@@ -80,7 +80,7 @@ ctest --test-dir build --output-on-failure
 ```
 
 These also exercise native VST3/CLAP editor embedding. Linux needs a display
-(or `xvfb-run -a`). Set `SUPPRESSOR_UI_CAPTURE_DIR` to an absolute directory to
+with a window manager (CI uses Xvfb + Openbox). Set `SUPPRESSOR_UI_CAPTURE_DIR` to an absolute directory to
 save real editor captures at 100–200% scaling.
 
 ### CI

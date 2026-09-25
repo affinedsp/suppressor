@@ -10,6 +10,24 @@ void pump (int ms = 50)
     juce::MessageManager::getInstance()->runDispatchLoopUntil (ms);
     juce::Timer::callPendingTimersSynchronously();
 }
+template <typename Predicate>
+bool waitFor (Predicate predicate)
+{
+    // Message/timer delivery is asynchronous, especially on loaded CI hosts.
+    // Wait for the actual state with a deadline, not an assumed 50 ms tick.
+    const auto deadline = juce::Time::getMillisecondCounterHiRes() + 2000.0;
+    do
+    {
+        pump (20);
+        if (predicate()) return true;
+    } while (juce::Time::getMillisecondCounterHiRes() < deadline);
+    return false;
+}
+void expectStatus (juce::Label& status, const juce::String& expected)
+{
+    const bool matched = waitFor ([&] { return status.getText() == expected; });
+    CHECK_MESSAGE (matched, "Expected ", expected, "; got ", status.getText());
+}
 void setParameter (SuppressorProcessor& p, const char* id, float plain)
 {
     auto* parameter = p.apvts.getParameter (id);
@@ -288,8 +306,8 @@ TEST_CASE ("live meter states, stale data, legacy modes and monitor labels are e
     REQUIRE (summary != nullptr);
     CHECK (status->getText() == "No audio");
     capture (*editor, "suppressor-default");
-    feed (p); pump();
-    CHECK (status->getText() == "Suppressing");
+    feed (p);
+    expectStatus (*status, "Suppressing");
     CHECK (summary->getDescription().contains ("High-band reduction"));
     capture (*editor, "suppressor-ui");
     for (float scale : { 1.0f, 1.25f, 1.5f, 1.75f, 2.0f })
@@ -301,31 +319,30 @@ TEST_CASE ("live meter states, stale data, legacy modes and monitor labels are e
         capture (*editor, "suppressor-scale-" + juce::String (juce::roundToInt (scale * 100)), scale);
     }
     editor->setScaleFactor (1);
-    setParameter (p, "deltaAudition", 1); pump();
-    CHECK (status->getText() == "No audio"); // old output is not relabelled as removed audio
-    feed (p); pump();
-    CHECK (status->getText() == "Listening to difference");
+    setParameter (p, "deltaAudition", 1);
+    expectStatus (*status, "No audio"); // old output is not relabelled as removed audio
+    feed (p);
+    expectStatus (*status, "Listening to difference");
     CHECK (summary->getDescription().contains ("removed"));
     capture (*editor, "suppressor-delta-audition");
-    feed (p, 120, false, true); pump();
-    CHECK (status->getText() == "Bypassed");
+    feed (p, 120, false, true);
+    expectStatus (*status, "Bypassed");
     capture (*editor, "suppressor-bypassed");
     setParameter (p, "deltaAudition", 0);
-    feed (p, 700, true); pump();
-    CHECK (status->getText() == "No input");
+    feed (p, 700, true);
+    expectStatus (*status, "No input");
     capture (*editor, "suppressor-silence");
     setParameter (p, "bandMode", 1); setParameter (p, "bandsLearn", 1);
-    feed (p); pump();
-    CHECK (status->getText() == "Learning bands");
+    feed (p);
+    expectStatus (*status, "Learning bands");
     CHECK (summary->getDescription().contains ("unavailable"));
     CHECK_FALSE (editor->findChildWithID ("threshold")->isEnabled());
     CHECK_FALSE (editor->findChildWithID ("strength")->isEnabled());
     CHECK (namedLabel (*editor, "Host settings")->getText() == "Host settings active");
     capture (*editor, "suppressor-learning");
-    setParameter (p, "bandsLearn", 0); feed (p); pump();
-    CHECK (summary->getDescription().contains ("Maximum band reduction"));
-    pump (600);
-    CHECK (status->getText() == "No audio");
+    setParameter (p, "bandsLearn", 0); feed (p);
+    CHECK (waitFor ([&] { return summary->getDescription().contains ("Maximum band reduction"); }));
+    expectStatus (*status, "No audio");
     CHECK (summary->getDescription() == "No current audio readings");
     editor.reset();
     editor = std::make_unique<SuppressorEditor> (p);
@@ -361,8 +378,8 @@ TEST_CASE ("sidechain levels are excluded and clipping is visible and accessible
     pump();
     auto* summary = namedLabel (editor, "Signal meters");
     REQUIRE (summary != nullptr);
-    CHECK (summary->getDescription().contains ("Input clipped"));
-    CHECK (summary->getDescription().contains ("Output clipped"));
+    CHECK (waitFor ([&] { return summary->getDescription().contains ("Input clipped")
+                             && summary->getDescription().contains ("Output clipped"); }));
     capture (editor, "suppressor-clipping");
     for (float value : { 0.0f, 1.0f })
     {

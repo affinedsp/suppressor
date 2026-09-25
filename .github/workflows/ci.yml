@@ -59,7 +59,7 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y ninja-build pkg-config xvfb \
+          sudo apt-get install -y ninja-build pkg-config xvfb openbox x11-utils \
             libasound2-dev libx11-dev libxext-dev libxinerama-dev libxrandr-dev \
             libxcursor-dev libgl1-mesa-dev libfreetype6-dev libfontconfig1-dev
 
@@ -92,12 +92,34 @@ jobs:
         run: |
           mkdir -p ui-captures
           if [ "${{ runner.os }}" = "Windows" ]; then
-            export SUPPRESSOR_UI_CAPTURE_DIR="$(pwd -W)/ui-captures"
+            SUPPRESSOR_UI_CAPTURE_DIR="$(pwd -W)/ui-captures"
           else
-            export SUPPRESSOR_UI_CAPTURE_DIR="$PWD/ui-captures"
+            SUPPRESSOR_UI_CAPTURE_DIR="$PWD/ui-captures"
           fi
+          export SUPPRESSOR_UI_CAPTURE_DIR
           if [ "${{ runner.os }}" = "Linux" ]; then
-            xvfb-run -a ctest --test-dir build --output-on-failure -C Release -R suppressor-ui-unit
+            # Native JUCE peers need WM_PROTOCOLS and other window-manager atoms,
+            # which a bare Xvfb server does not supply. Variables below belong to
+            # the inner shell running on that display.
+            # shellcheck disable=SC2016
+            xvfb-run -a sh -c '
+              openbox --sm-disable >/tmp/suppressor-openbox.log 2>&1 &
+              wm_pid=$!
+              trap "kill $wm_pid 2>/dev/null || true" EXIT
+              ready=false
+              for attempt in $(seq 1 50); do
+                if xprop -root _NET_SUPPORTING_WM_CHECK | grep -q "window id"; then
+                  ready=true
+                  break
+                fi
+                sleep 0.1
+              done
+              if [ "$ready" != true ]; then
+                echo "Window manager did not start"
+                exit 1
+              fi
+              ctest --test-dir build --output-on-failure -C Release -R suppressor-ui-unit
+            '
           else
             ctest --test-dir build --output-on-failure -C Release -R suppressor-ui-unit
           fi
@@ -233,7 +255,7 @@ jobs:
              for d in *.vst3; do [ -e "$d" ] && zip -qr "../suppressor-${short}-vst3.zip" "$d"; done && \
              for f in *.clap; do [ -e "$f" ] && zip -qr "../suppressor-${short}-clap.zip" "$f"; done)
           done
-          ls -la *.zip
+          ls -la -- *.zip
 
       - uses: actions/upload-artifact@v4
         with:
