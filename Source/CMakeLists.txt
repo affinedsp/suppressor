@@ -56,6 +56,7 @@ if (SUPPRESSOR_BUILD_TESTS)
     add_executable(SuppressorUITests)
 
     target_sources(SuppressorUITests PRIVATE
+        ../Tests/test_ui_main.cpp
         ../Tests/test_ui.cpp)
 
     target_include_directories(SuppressorUITests PRIVATE
@@ -63,7 +64,7 @@ if (SUPPRESSOR_BUILD_TESTS)
 
     target_link_libraries(SuppressorUITests PRIVATE
         Suppressor
-        doctest::doctest_with_main
+        doctest::doctest
         juce::juce_audio_utils
         juce::juce_recommended_config_flags
         juce::juce_recommended_warning_flags)
@@ -72,7 +73,8 @@ if (SUPPRESSOR_BUILD_TESTS)
         JUCE_WEB_BROWSER=0
         JUCE_USE_CURL=0
         JUCE_MODAL_LOOPS_PERMITTED=1
-        JUCE_PLUGINHOST_VST3=1)
+        JUCE_PLUGINHOST_VST3=1
+        $<$<PLATFORM_ID:Windows>:_CONSOLE=1>)
 
     # Keep assertion context in CTest's failure log, including native-window exits.
     add_test(NAME suppressor-ui-unit COMMAND SuppressorUITests --success)

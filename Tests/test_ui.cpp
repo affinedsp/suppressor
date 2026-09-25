@@ -404,12 +404,18 @@ TEST_CASE ("VST3 native editor lifecycle and host parameter state recall")
     INFO (errorMessage);
     REQUIRE (p != nullptr);
     prepare (*p);
+    juce::Component hostWindow;
+    hostWindow.setBounds (80, 80, 640, 460);
+    hostWindow.addToDesktop (0);
+    hostWindow.setVisible (true);
+    pump();
     for (int reopen = 0; reopen < 3; ++reopen)
     {
         std::unique_ptr<juce::AudioProcessorEditor> editor (p->createEditorIfNeeded());
         REQUIRE (editor != nullptr);
-        editor->addToDesktop (0);
-        editor->setVisible (true);
+        // Exercise embedding in the host's native window, rather than making
+        // the VST3 adapter itself the top-level window.
+        hostWindow.addAndMakeVisible (*editor);
         pump();
         feed (*p); pump();
         CHECK (editor->getWidth() == 640);
