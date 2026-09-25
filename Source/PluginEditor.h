@@ -1,91 +1,77 @@
 #pragma once
 
-#include "PluginLookAndFeel.h"
 #include "PluginProcessor.h"
-#include <juce_gui_basics/juce_gui_basics.h>
+#include "PluginLookAndFeel.h"
 
-class ActivityDisplay final : public juce::Component
+class SuppressorDial final : public juce::Slider
 {
 public:
-    void setState (float detectorDb, float gainReductionDb, float thresholdDb,
-                   int bandMode, bool deltaAudition, bool multibandLearning);
-    void paint (juce::Graphics&) override;
-    std::unique_ptr<juce::AccessibilityHandler> createAccessibilityHandler() override;
+    SuppressorDial (juce::AudioProcessorValueTreeState&, const juce::String& id,
+                    const juce::String& help);
+    ~SuppressorDial() override;
+    void resized() override;
+    void mouseDown (const juce::MouseEvent&) override;
+    void mouseDrag (const juce::MouseEvent&) override;
+    void mouseUp (const juce::MouseEvent&) override;
+    void mouseDoubleClick (const juce::MouseEvent&) override;
+    bool keyPressed (const juce::KeyPress&) override;
+    void focusGained (FocusChangeType) override { repaint(); }
+    void focusLost (FocusChangeType) override { repaint(); }
+    void enablementChanged() override;
+    void beginEntry();
+    void cancelInteraction();
+    juce::RangedAudioParameter& parameter;
 
 private:
-    class ValueInterface;
-    juce::String accessibleValueText() const;
-    juce::String semanticStatus() const;
-
-    float detector = -180.0f;
-    float reduction = 0.0f;
-    float threshold = -40.0f;
-    int mode = 0;
-    bool delta = false;
-    bool learning = false;
+    void finishEntry (bool commit);
+    void setWithGesture (double);
+    void showMenu();
+    juce::TextEditor entry;
+    juce::Point<float> lastDrag;
+    double dragProportion = 0.0;
+    std::unique_ptr<juce::Slider::ScopedDragNotification> drag;
+    juce::AudioProcessorValueTreeState::SliderAttachment attachment;
 };
 
-class SuppressorEditor final : public juce::AudioProcessorEditor,
-                               private juce::Timer
+class ListenButton final : public juce::TextButton
+{
+public:
+    ListenButton() : juce::TextButton ("Listen removed") {}
+    bool keyPressed (const juce::KeyPress& key) override
+    {
+        if (isEnabled() && key.isKeyCode (' '))
+        {
+            setToggleState (! getToggleState(), juce::sendNotificationSync);
+            return true;
+        }
+        return juce::TextButton::keyPressed (key);
+    }
+};
+
+class SuppressorEditor final : public juce::AudioProcessorEditor, private juce::Timer
 {
 public:
     explicit SuppressorEditor (SuppressorProcessor&);
     ~SuppressorEditor() override;
-
     void paint (juce::Graphics&) override;
     void resized() override;
     void visibilityChanged() override;
     int getControlParameterIndex (juce::Component&) override;
 
 private:
-    struct Entry
-    {
-        juce::String id;
-        ParameterSlider* slider = nullptr;
-        juce::ComboBox* combo = nullptr;
-        juce::Button* button = nullptr;
-        std::unique_ptr<juce::Label> label;
-        std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> sliderAttachment;
-        std::unique_ptr<juce::AudioProcessorValueTreeState::ComboBoxAttachment> comboAttachment;
-        std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> buttonAttachment;
-    };
-
     void timerCallback() override;
-    ParameterSlider& addKnob (const juce::String& parameterId, const juce::String& label);
-    juce::ComboBox& addCombo (const juce::String& parameterId, const juce::String& label);
-    juce::ToggleButton& addToggle (const juce::String& parameterId, const juce::String& label);
-    void addAction (const juce::String& parameterId, juce::TextButton& button,
-                    const juce::String& accessibleName);
-    Entry* findEntry (const juce::String& parameterId) const;
-    void placeKnob (const juce::String& parameterId, juce::Rectangle<int> bounds);
-    void placeCombo (const juce::String& parameterId, juce::Rectangle<int> bounds);
-    void placeButton (const juce::String& parameterId, juce::Rectangle<int> bounds);
-    void updateModePresentation();
-    void updateTimerState();
-    void paintPanel (juce::Graphics&, juce::Rectangle<int>, const juce::String&) const;
-
+    void drawLevel (juce::Graphics&, int y, const juce::String&, float peak, bool clip);
     SuppressorProcessor& proc;
-    SuppressorLookAndFeel lookAndFeel;
-    ActivityDisplay activityDisplay;
-    juce::TooltipWindow tooltipWindow { this, 1200 };
-
-    std::vector<std::unique_ptr<ParameterSlider>> sliders;
-    std::vector<std::unique_ptr<juce::ComboBox>> comboBoxes;
-    std::vector<std::unique_ptr<juce::ToggleButton>> toggleButtons;
-    std::vector<std::unique_ptr<Entry>> entries;
-
-    ParameterTextButton humLearnButton { "LEARN" };
-    ParameterTextButton bandsLearnButton { "LEARN" };
-    juce::Label humStatus;
-    juce::Label bandsStatus;
-
-    juce::Rectangle<int> coreBounds;
-    juce::Rectangle<int> activityBounds;
-    juce::Rectangle<int> detectionBounds;
-    juce::Rectangle<int> humBounds;
-    juce::Rectangle<int> outputBounds;
-
-    int nextFocusOrder = 1;
+    SuppressorLookAndFeel theme;
+    SuppressorDial threshold, strength, release;
+    ListenButton listen;
+    juce::AudioProcessorValueTreeState::ButtonAttachment listenAttachment;
+    juce::Label status, meterSummary, hostSettings;
+    juce::TooltipWindow tooltips { this, 700 };
+    suppressor::MeterSnapshot meter;
+    uint32_t lastSequence = 0;
+    double lastUpdateMs = 0.0;
+    bool fresh = false;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (SuppressorEditor)
 };

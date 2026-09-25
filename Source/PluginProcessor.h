@@ -2,6 +2,7 @@
 
 #include <juce_audio_processors/juce_audio_processors.h>
 #include "DSP/DenoiserEngine.h"
+#include "Metering.h"
 
 class SuppressorProcessor : public juce::AudioProcessor,
                             private juce::AsyncUpdater
@@ -38,17 +39,8 @@ public:
     // ------------------------------------------------------------------
     juce::AudioProcessorValueTreeState apvts;
 
-    // Metering / status for the editor (read on the message thread)
-    float detectorDb() const noexcept   { return detectorDbAtomic.load(); }
-    float gainReductionDb() const noexcept { return grDbAtomic.load(); }
-    bool humLearning() const noexcept;
-    bool humLocked() const noexcept;
-    bool bandsLearning() const noexcept;
-    bool bandsLocked() const noexcept;
-    int  humActiveDips() const noexcept;
-    double humDetectedBaseHz() const noexcept;
-    void requestHumLearnStop()    { humLearnRequest = false; }
-    void requestBandsLearnStop()  { bandsLearnRequest = false; }
+    // Bounded, race-free telemetry; never expose mutable DSP state to the editor.
+    bool readMeters (suppressor::MeterSnapshot& result) const noexcept { return meters.read (result); }
 
     static juce::AudioProcessorValueTreeState::ParameterLayout createParameterLayout();
 
@@ -58,13 +50,12 @@ private:
 
     suppressor::DenoiserEngine engine;
 
-    std::atomic<float> detectorDbAtomic { -120.0f };
-    std::atomic<float> grDbAtomic { 0.0f };
+    suppressor::Metering meters;
     std::atomic<bool>  latencyDirty { false };
     std::atomic<bool>  humAutoFinished { false };
 
-    bool humLearnRequest = false, humLearningNow = false;
-    bool bandsLearnRequest = false, bandsLearningNow = false;
+    bool humLearningNow = false;
+    bool bandsLearningNow = false;
     int currentLatency = 0;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (SuppressorProcessor)

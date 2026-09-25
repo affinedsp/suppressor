@@ -1,429 +1,445 @@
 #include <doctest/doctest.h>
-
 #include "PluginEditor.h"
-#include "PluginLookAndFeel.h"
-
-#include <algorithm>
 #include <array>
-#include <cmath>
 #include <set>
 
 namespace
 {
-float relativeLuminance (juce::Colour colour)
+void pump (int ms = 50)
 {
-    auto linearise = [] (float value)
+    juce::MessageManager::getInstance()->runDispatchLoopUntil (ms);
+    juce::Timer::callPendingTimersSynchronously();
+}
+template <typename Predicate>
+bool waitFor (Predicate predicate)
+{
+    // Message/timer delivery is asynchronous, especially on loaded CI hosts.
+    // Wait for the actual state with a deadline, not an assumed 50 ms tick.
+    const auto deadline = juce::Time::getMillisecondCounterHiRes() + 2000.0;
+    do
     {
-        return value <= 0.04045f ? value / 12.92f
-                                 : std::pow ((value + 0.055f) / 1.055f, 2.4f);
-    };
-
-    return 0.2126f * linearise (colour.getFloatRed())
-         + 0.7152f * linearise (colour.getFloatGreen())
-         + 0.0722f * linearise (colour.getFloatBlue());
+        pump (20);
+        if (predicate()) return true;
+    } while (juce::Time::getMillisecondCounterHiRes() < deadline);
+    return false;
 }
-
-float contrastRatio (juce::Colour first, juce::Colour second)
+void expectStatus (juce::Label& status, const juce::String& expected)
 {
-    const auto lighter = std::max (relativeLuminance (first), relativeLuminance (second));
-    const auto darker = std::min (relativeLuminance (first), relativeLuminance (second));
-    return (lighter + 0.05f) / (darker + 0.05f);
+    const bool matched = waitFor ([&] { return status.getText() == expected; });
+    CHECK_MESSAGE (matched, "Expected ", expected, "; got ", status.getText());
 }
-
-int countPixelsNear (juce::Image& image, juce::Colour target)
+void setParameter (SuppressorProcessor& p, const char* id, float plain)
 {
-    int count = 0;
-    for (int y = 0; y < image.getHeight(); ++y)
-        for (int x = 0; x < image.getWidth(); ++x)
+    auto* parameter = p.apvts.getParameter (id);
+    parameter->setValueNotifyingHost (parameter->convertTo0to1 (plain));
+}
+void prepare (juce::AudioProcessor& p)
+{
+    p.setRateAndBufferSizeDetails (48000, 256);
+    p.prepareToPlay (48000, 256);
+}
+void feed (juce::AudioProcessor& p, int blocks = 120, bool silence = false, bool bypass = false)
+{
+    juce::AudioBuffer<float> buffer (2, 256);
+    juce::MidiBuffer midi;
+    for (int b = 0; b < blocks; ++b)
+    {
+        for (int n = 0; n < 256; ++n)
         {
-            const auto pixel = image.getPixelAt (x, y);
-            const auto distance = std::abs (pixel.getFloatRed() - target.getFloatRed())
-                                + std::abs (pixel.getFloatGreen() - target.getFloatGreen())
-                                + std::abs (pixel.getFloatBlue() - target.getFloatBlue());
-            if (distance < 0.08f)
-                ++count;
+            const auto phase = juce::MathConstants<double>::twoPi * (b * 256 + n) / 48000.0;
+            const auto sample = silence ? 0.0f : static_cast<float> (0.08 * std::sin (220.0 * phase)
+                                                                      + 0.003 * std::sin (11000.0 * phase));
+            buffer.setSample (0, n, sample);
+            buffer.setSample (1, n, sample * 0.7f);
         }
-    return count;
+        if (bypass) p.processBlockBypassed (buffer, midi); else p.processBlock (buffer, midi);
+    }
 }
-
-juce::MouseEvent makeMouseEvent (juce::Component& target, juce::ModifierKeys modifiers,
-                                 int clicks)
+juce::MouseEvent event (juce::Component& c, juce::Point<float> pos = { 60, 60 }, int modifiers = juce::ModifierKeys::leftButtonModifier)
 {
     const auto now = juce::Time::getCurrentTime();
-    return { juce::Desktop::getInstance().getMainMouseSource(), { 60.0f, 70.0f },
-             modifiers, 1.0f, 0.0f, 0.0f, 0.0f, 0.0f, &target, &target, now,
-             { 60.0f, 70.0f }, now, clicks, false };
+    return { juce::Desktop::getInstance().getMainMouseSource(), pos, juce::ModifierKeys (modifiers),
+             1, 0, 0, 0, 0, &c, &c, now, { 60, 60 }, now, 1, true };
 }
-
-struct ParameterGestureCounter final : juce::AudioProcessorParameter::Listener
+struct Gestures final : juce::AudioProcessorParameter::Listener
 {
-    void parameterValueChanged (int, float) override {}
-    void parameterGestureChanged (int, bool starting) override
-    {
-        starting ? ++starts : ++ends;
-    }
-
-    void reset()
-    {
-        starts = 0;
-        ends = 0;
-    }
-
-    int starts = 0;
-    int ends = 0;
+    void parameterValueChanged (int, float) override { ++changes; }
+    void parameterGestureChanged (int, bool start) override { start ? ++starts : ++ends; }
+    int starts = 0, ends = 0, changes = 0;
 };
-
-}
-
-TEST_CASE ("theme colours meet text and essential-control contrast targets")
+juce::Label* namedLabel (juce::Component& editor, const juce::String& name)
 {
-    CHECK (contrastRatio (SuppressorTheme::primaryText, SuppressorTheme::canvas) >= 4.5f);
-    CHECK (contrastRatio (SuppressorTheme::secondaryText, SuppressorTheme::surface) >= 4.5f);
-    CHECK (contrastRatio (SuppressorTheme::accent, SuppressorTheme::canvas) >= 4.5f);
-    CHECK (contrastRatio (SuppressorTheme::warning, SuppressorTheme::surface) >= 4.5f);
-    CHECK (contrastRatio (SuppressorTheme::error, SuppressorTheme::surface) >= 4.5f);
-    CHECK (contrastRatio (SuppressorTheme::controlOutline,
-                          SuppressorTheme::surfaceRaised) >= 3.0f);
+    for (auto* c : editor.getChildren())
+        if (c->getName() == name) return dynamic_cast<juce::Label*> (c);
+    return nullptr;
 }
-
-TEST_CASE ("rotary value is represented by a proportional accent arc")
+void capture (juce::Component& editor, const juce::String& name, float scale = 1.0f)
 {
-    SuppressorLookAndFeel lookAndFeel;
-    juce::Slider slider;
-    slider.setLookAndFeel (&lookAndFeel);
-
-    auto render = [&] (float position)
+    const auto path = juce::SystemStats::getEnvironmentVariable ("SUPPRESSOR_UI_CAPTURE_DIR", {});
+    if (path.isEmpty()) return;
+    auto dir = juce::File (path);
+    REQUIRE (dir.createDirectory().wasOk());
+    const auto image = editor.createComponentSnapshot (editor.getLocalBounds(), true, scale);
+    auto file = dir.getChildFile (name + ".png");
+    file.deleteFile();
+    auto stream = file.createOutputStream();
+    REQUIRE (stream != nullptr);
+    REQUIRE (juce::PNGImageFormat().writeImageToStream (image, *stream));
+    stream->flush();
+}
+float contrast (juce::Colour a, juce::Colour b)
+{
+    auto lum = [] (juce::Colour c)
     {
-        juce::Image image (juce::Image::RGB, 120, 120, true);
-        juce::Graphics graphics (image);
-        lookAndFeel.drawRotarySlider (graphics, 10, 10, 100, 100, position,
-                                      juce::MathConstants<float>::pi * 1.25f,
-                                      juce::MathConstants<float>::pi * 2.75f,
-                                      slider);
-        return image;
+        auto linear = [] (float v) { return v <= 0.04045f ? v / 12.92f : std::pow ((v + 0.055f) / 1.055f, 2.4f); };
+        return .2126f * linear (c.getFloatRed()) + .7152f * linear (c.getFloatGreen()) + .0722f * linear (c.getFloatBlue());
     };
+    return (std::max (lum (a), lum (b)) + .05f) / (std::min (lum (a), lum (b)) + .05f);
+}
+} // namespace
 
-    auto minimum = render (0.0f);
-    auto maximum = render (1.0f);
-    CHECK (countPixelsNear (maximum, SuppressorTheme::accent)
-           > countPixelsNear (minimum, SuppressorTheme::accent) + 100);
+TEST_CASE ("theme retains bundled fonts and accessible contrast")
+{
+    using namespace SuppressorTheme;
+    CHECK (makeFont (18).getTypefaceName() == "Barlow Condensed");
+    CHECK (makeFont (18).getTypefaceStyle() != makeFont (18, true).getTypefaceStyle());
+    for (auto colour : { primaryText, secondaryText, accent, warning, error })
+        CHECK (contrast (colour, surface) >= 4.5f);
+    CHECK (contrast (controlOutline, surfaceRaised) >= 3.0f);
 }
 
-TEST_CASE ("rotary value field is centred and leaves the complete dial draggable")
+TEST_CASE ("four controls preserve the complete host parameter and saved-state contract")
 {
     juce::ScopedJuceInitialiser_GUI gui;
-    SuppressorLookAndFeel lookAndFeel;
-    juce::Component parent;
-    ParameterSlider slider;
-    parent.setLookAndFeel (&lookAndFeel);
-    parent.setBounds (0, 0, 120, 140);
-    parent.addAndMakeVisible (slider);
-    slider.setBounds (parent.getLocalBounds());
-    slider.setSliderStyle (juce::Slider::RotaryHorizontalVerticalDrag);
-    slider.setTextBoxStyle (juce::Slider::TextBoxBelow, false, 80, 24);
-
-    const auto layout = lookAndFeel.getSliderLayout (slider);
-    CHECK (layout.sliderBounds == slider.getLocalBounds());
-    CHECK (layout.textBoxBounds.getCentre() == slider.getLocalBounds().getCentre());
-
-    auto* valueLabel = dynamic_cast<juce::Label*> (slider.getChildComponent (0));
-    REQUIRE (valueLabel != nullptr);
-    bool labelInterceptsClicks = true;
-    bool editorInterceptsClicks = false;
-    valueLabel->getInterceptsMouseClicks (labelInterceptsClicks, editorInterceptsClicks);
-    CHECK_FALSE (labelInterceptsClicks);
-    CHECK (editorInterceptsClicks);
-    CHECK (slider.getComponentAt (layout.textBoxBounds.getCentre()) == &slider);
-}
-
-TEST_CASE ("bundled display font is available in both weights")
-{
-    const auto regular = SuppressorTheme::makeFont (18.0f);
-    const auto semibold = SuppressorTheme::makeFont (18.0f, true);
-    CHECK (regular.getTypefaceName() == "Barlow Condensed");
-    CHECK (semibold.getTypefaceName() == "Barlow Condensed");
-    CHECK (regular.getTypefaceStyle() != semibold.getTypefaceStyle());
-}
-
-TEST_CASE ("double-click opens exact value entry instead of resetting")
-{
-    juce::ScopedJuceInitialiser_GUI gui;
-    SuppressorLookAndFeel lookAndFeel;
-    ParameterSlider slider;
-    slider.setLookAndFeel (&lookAndFeel);
-    slider.setBounds (0, 0, 120, 140);
-    slider.setSliderStyle (juce::Slider::RotaryHorizontalVerticalDrag);
-    slider.setTextBoxStyle (juce::Slider::TextBoxBelow, false, 80, 24);
-    slider.setDoubleClickReturnValue (true, 0.5);
-    slider.setValue (0.8);
-
-    auto event = makeMouseEvent (slider,
-                                 juce::ModifierKeys (juce::ModifierKeys::leftButtonModifier),
-                                 2);
-    slider.mouseDoubleClick (event);
-
-    auto* valueLabel = dynamic_cast<juce::Label*> (slider.getChildComponent (0));
-    REQUIRE (valueLabel != nullptr);
-    CHECK (valueLabel->isBeingEdited());
-    CHECK (slider.getValue() == doctest::Approx (0.8));
-    slider.hideTextBox (true);
-}
-
-TEST_CASE ("invalid exact-entry text preserves the current value")
-{
-    ParameterSlider slider;
-    slider.setRange (-80.0, 0.0, 0.1);
-    slider.setTextValueSuffix (" dB");
-    slider.setValue (-40.0);
-
-    CHECK (slider.getValueFromText ("not a number") == doctest::Approx (-40.0));
-    CHECK (slider.getValueFromText ("--12") == doctest::Approx (-40.0));
-    CHECK (slider.getValueFromText ("1e2") == doctest::Approx (-40.0));
-    CHECK (slider.getValueFromText ("0x10") == doctest::Approx (-40.0));
-    CHECK (slider.getValueFromText ("-12.5 garbage") == doctest::Approx (-40.0));
-    CHECK (slider.getValueFromText ("-12.5 dB") == doctest::Approx (-12.5));
-}
-
-TEST_CASE ("Alt/Option-click remains the non-conflicting default reset gesture")
-{
-    struct DragCounter final : juce::Slider::Listener
+    SuppressorProcessor p;
+    SuppressorEditor editor (p);
+    editor.addToDesktop (0);
+    editor.setVisible (true);
+    const juce::StringArray ids { "strength", "threshold", "release", "gateMode", "depth", "hysteresis", "hold",
+        "adaptiveRelease", "cue", "sidechain", "lookahead", "humEnable", "humBase", "humHarmonics", "humStrength",
+        "humLearn", "bandMode", "bandsLearn", "deltaAudition", "outputGain" };
+    const std::array<float, 20> defaults { .9f, -40, 6, 0, 40, 6, 2, 0, 0, 0, 0, 0, 0, 8, 1, 0, 0, 0, 0, 0 };
+    REQUIRE (p.getParameters().size() == ids.size());
+    CHECK (editor.getWidth() == 640);
+    CHECK (editor.getHeight() == 460);
+    CHECK_FALSE (editor.isResizable());
+    std::set<int> focus;
+    int controls = 0;
+    for (int i = 0; i < ids.size(); ++i)
     {
-        void sliderValueChanged (juce::Slider*) override {}
-        void sliderDragStarted (juce::Slider*) override { ++starts; }
-        void sliderDragEnded (juce::Slider*) override { ++ends; }
-
-        int starts = 0;
-        int ends = 0;
-    } counter;
-
-    juce::ScopedJuceInitialiser_GUI gui;
-    ParameterSlider slider;
-    slider.addListener (&counter);
-    slider.setBounds (0, 0, 120, 140);
-    slider.setRange (0.0, 1.0, 0.01);
-    slider.setDoubleClickReturnValue (true, 0.25, juce::ModifierKeys::altModifier);
-    slider.setValue (0.8);
-
-    auto event = makeMouseEvent (
-        slider,
-        juce::ModifierKeys (juce::ModifierKeys::leftButtonModifier
-                            | juce::ModifierKeys::altModifier),
-        1);
-    slider.mouseDown (event);
-    CHECK (slider.getValue() == doctest::Approx (0.25));
-    CHECK (counter.starts == 1);
-    CHECK (counter.ends == 1);
-
-    auto dragEvent = makeMouseEvent (
-        slider, juce::ModifierKeys (juce::ModifierKeys::leftButtonModifier), 1);
-    slider.mouseDown (dragEvent);
-    CHECK (counter.starts == 2);
-    CHECK (counter.ends == 1);
-    slider.endActiveGesture();
-    CHECK (counter.ends == 2);
-    CHECK (slider.getThumbBeingDragged() == -1);
-}
-
-
-TEST_CASE ("editor integrates every parameter with truthful state and balanced gestures")
-{
-    juce::ScopedJuceInitialiser_GUI gui;
-    SuppressorProcessor processor;
-    auto editor = std::make_unique<SuppressorEditor> (processor);
-
-    const juce::StringArray parameterIds {
-        "strength", "threshold", "release", "gateMode", "depth", "hysteresis", "hold",
-        "adaptiveRelease", "cue", "sidechain", "lookahead", "humEnable", "humBase",
-        "humHarmonics", "humStrength", "humLearn", "bandMode", "bandsLearn",
-        "deltaAudition", "outputGain"
-    };
-
-    CHECK (editor->getWidth() == 1000);
-    CHECK (editor->getHeight() == 640);
-    CHECK_FALSE (editor->isResizable());
-    REQUIRE (editor->getNumChildComponents() > 0);
-    CHECK (editor->getChildComponent (0)->getName() == "Suppression activity");
-    CHECK (editor->getChildComponent (0)->getExplicitFocusOrder() == 1);
-    CHECK (processor.getParameters().size() == parameterIds.size());
-
-    std::set<int> focusOrders;
-    std::set<std::string> accessibleNames;
-    for (const auto& id : parameterIds)
-    {
-        CAPTURE (id);
-        auto* component = editor->findChildWithID (id);
-        auto* parameter = processor.apvts.getParameter (id);
-        REQUIRE (component != nullptr);
-        REQUIRE (parameter != nullptr);
-
-        const auto parameterIndex = processor.getParameters().indexOf (parameter);
-        CHECK (editor->getControlParameterIndex (*component) == parameterIndex);
-        CHECK (component->isVisible());
-        CHECK (component->getWidth() >= 32);
-        CHECK (component->getHeight() >= 32);
-        CHECK (component->getWantsKeyboardFocus());
-        CHECK (component->getExplicitFocusOrder() > 0);
-        CHECK (focusOrders.insert (component->getExplicitFocusOrder()).second);
-        CHECK (component->getName().isNotEmpty());
-        CHECK (accessibleNames.insert (component->getName().toStdString()).second);
-
-        if (auto* slider = dynamic_cast<ParameterSlider*> (component))
+        auto* param = p.apvts.getParameter (ids[i]);
+        REQUIRE (param != nullptr);
+        CHECK (p.getParameters()[i] == param);
+        CHECK (param->getVersionHint() == 1);
+        CHECK (param->convertFrom0to1 (param->getDefaultValue()) == doctest::Approx (defaults[static_cast<size_t> (i)]));
+        auto* component = editor.findChildWithID (ids[i]);
+        const bool visible = ids[i] == "strength" || ids[i] == "threshold" || ids[i] == "release" || ids[i] == "deltaAudition";
+        CHECK ((component != nullptr) == visible);
+        if (component != nullptr)
         {
-            CHECK (slider->getTextFromValue (slider->getValue()).isNotEmpty());
-            REQUIRE (slider->getNumChildComponents() > 0);
-            CHECK (editor->getControlParameterIndex (*slider->getChildComponent (0))
-                   == parameterIndex);
+            ++controls;
+            CHECK (editor.getControlParameterIndex (*component) == i);
+            CHECK (component->getWidth() >= 32);
+            CHECK (component->getHeight() >= 32);
+            CHECK (component->getWantsKeyboardFocus());
+            CHECK (component->getName().isNotEmpty());
+            CHECK (component->getAccessibilityHandler() != nullptr);
+            CHECK (focus.insert (component->getExplicitFocusOrder()).second);
         }
+        param->setValueNotifyingHost (param->convertTo0to1 (param->convertFrom0to1 (0.27f)));
     }
-    CHECK (focusOrders.size() == 20);
-    CHECK (accessibleNames.size() == 20);
+    CHECK (controls == 4);
+    juce::MemoryBlock saved;
+    p.getStateInformation (saved);
+    SuppressorProcessor recalled;
+    recalled.setStateInformation (saved.getData(), static_cast<int> (saved.getSize()));
+    for (const auto& id : ids)
+        CHECK (recalled.apvts.getParameter (id)->getValue() == doctest::Approx (p.apvts.getParameter (id)->getValue()));
+}
 
-    auto* strength = dynamic_cast<ParameterSlider*> (editor->findChildWithID ("strength"));
-    auto* strengthParameter = processor.apvts.getParameter ("strength");
-    REQUIRE (strength != nullptr);
-    REQUIRE (strengthParameter != nullptr);
-    CHECK (strength->getValueFromText ("50 %") == doctest::Approx (0.5));
-    CHECK (strength->getValueFromText ("50 garbage")
-           == doctest::Approx (strength->getValue()));
-    CHECK (strength->getValueFromText ("1e2")
-           == doctest::Approx (strength->getValue()));
-
-    ParameterGestureCounter gestures;
-    strengthParameter->addListener (&gestures);
-    strength->setValue (0.2, juce::sendNotificationSync);
-    gestures.reset();
-    CHECK (strength->keyPressed (juce::KeyPress (juce::KeyPress::rightKey)));
+TEST_CASE ("dials support balanced drag, fine, exact, cancel, invalid, reset and close gestures")
+{
+    juce::ScopedJuceInitialiser_GUI gui;
+    SuppressorProcessor p;
+    auto editor = std::make_unique<SuppressorEditor> (p);
+    editor->addToDesktop (0);
+    editor->setVisible (true);
+    auto* dial = dynamic_cast<SuppressorDial*> (editor->findChildWithID ("strength"));
+    REQUIRE (dial != nullptr);
+    auto& param = dial->parameter;
+    Gestures gestures;
+    param.addListener (&gestures);
+    CHECK (dial->getComponentAt (dial->getLocalBounds().getCentre()) == dial);
+    setParameter (p, "strength", .5f);
+    dial->mouseDown (event (*dial));
+    dial->mouseDrag (event (*dial, { 60, 36 }));
+    dial->mouseUp (event (*dial));
+    CHECK (dial->getValue() == doctest::Approx (.6));
     CHECK (gestures.starts == 1);
     CHECK (gestures.ends == 1);
+    dial->mouseDown (event (*dial));
+    dial->mouseDrag (event (*dial, { 60, 36 }, juce::ModifierKeys::leftButtonModifier | juce::ModifierKeys::shiftModifier));
+    dial->mouseUp (event (*dial));
+    CHECK (dial->getValue() == doctest::Approx (.61));
+    CHECK (dial->keyPressed (juce::KeyPress (juce::KeyPress::rightKey)));
+    CHECK (dial->getValue() == doctest::Approx (.62));
+    auto* threshold = dynamic_cast<SuppressorDial*> (editor->findChildWithID ("threshold"));
+    REQUIRE (threshold != nullptr);
+    threshold->mouseDown (event (*threshold));
+    for (int pixel = 1; pixel <= 6; ++pixel)
+        threshold->mouseDrag (event (*threshold, { 60, 60.0f - static_cast<float> (pixel) },
+            juce::ModifierKeys::leftButtonModifier | juce::ModifierKeys::shiftModifier));
+    threshold->mouseUp (event (*threshold));
+    CHECK (threshold->getValue() == doctest::Approx (-39.8));
 
-    strength->setValue (0.2, juce::sendNotificationSync);
-    gestures.reset();
-    auto resetEvent = makeMouseEvent (
-        *strength,
-        juce::ModifierKeys (juce::ModifierKeys::leftButtonModifier
-                            | juce::ModifierKeys::altModifier),
-        1);
-    strength->mouseDown (resetEvent);
-    CHECK (strength->getValue() == doctest::Approx (0.9));
-    CHECK (gestures.starts == 1);
-    CHECK (gestures.ends == 1);
-
-    auto* adaptive = dynamic_cast<ParameterToggleButton*> (
-        editor->findChildWithID ("adaptiveRelease"));
-    auto* adaptiveParameter = processor.apvts.getParameter ("adaptiveRelease");
-    REQUIRE (adaptive != nullptr);
-    REQUIRE (adaptiveParameter != nullptr);
-    ParameterGestureCounter buttonGestures;
-    adaptiveParameter->addListener (&buttonGestures);
-    CHECK (adaptive->keyPressed (juce::KeyPress (' ')));
-    CHECK (adaptive->getToggleState());
+    auto enter = [&] (const juce::String& value, bool commit)
+    {
+        dial->keyPressed (juce::KeyPress (juce::KeyPress::returnKey));
+        auto* entry = dynamic_cast<juce::TextEditor*> (dial->getChildComponent (0));
+        REQUIRE (entry != nullptr);
+        REQUIRE (entry->isVisible());
+        CHECK (editor->getControlParameterIndex (*entry) == param.getParameterIndex());
+        entry->setText (value);
+        if (commit) entry->onReturnKey(); else entry->onEscapeKey();
+        CHECK_FALSE (entry->isVisible());
+    };
+    enter ("35 %", true);
+    CHECK (param.convertFrom0to1 (param.getValue()) == doctest::Approx (.35));
+    enter ("80 %", false);
+    CHECK (dial->getValue() == doctest::Approx (.35));
+    for (const auto& invalid : { "junk", "nan", "inf", "--12", "12 garbage", "0x10", "1e2", "" })
+    {
+        enter (invalid, true);
+        CHECK (dial->getValue() == doctest::Approx (.35));
+    }
+    enter ("999 %", true);
+    CHECK (dial->getValue() == 1.0);
+    dial->mouseDown (event (*dial, { 60, 60 }, juce::ModifierKeys::leftButtonModifier | juce::ModifierKeys::altModifier));
+    CHECK (dial->getValue() == doctest::Approx (.9));
+    setParameter (p, "strength", .42f);
+    CHECK (dial->getValue() == doctest::Approx (.42));
+    capture (*editor, "suppressor-exact-entry-before");
+    dial->beginEntry();
+    capture (*editor, "suppressor-exact-entry");
+    CHECK (gestures.starts == gestures.ends);
+    auto* listen = dynamic_cast<ListenButton*> (editor->findChildWithID ("deltaAudition"));
+    REQUIRE (listen != nullptr);
+    Gestures buttonGestures;
+    auto* listenParam = p.apvts.getParameter ("deltaAudition");
+    listenParam->addListener (&buttonGestures);
+    CHECK (listen->keyPressed (juce::KeyPress (' ')));
+    CHECK (listenParam->getValue() == doctest::Approx (1.0));
     CHECK (buttonGestures.starts == 1);
     CHECK (buttonGestures.ends == 1);
-    adaptiveParameter->removeListener (&buttonGestures);
-
-    auto* bandMode = dynamic_cast<juce::ComboBox*> (editor->findChildWithID ("bandMode"));
-    auto* bandsLearn = dynamic_cast<ParameterTextButton*> (
-        editor->findChildWithID ("bandsLearn"));
-    auto* bandsLearnParameter = processor.apvts.getParameter ("bandsLearn");
-    REQUIRE (bandMode != nullptr);
-    REQUIRE (bandsLearn != nullptr);
-    REQUIRE (bandsLearnParameter != nullptr);
-    ParameterGestureCounter learnGestures;
-    bandsLearnParameter->addListener (&learnGestures);
-    bandMode->setSelectedItemIndex (1, juce::sendNotificationSync);
-    CHECK (bandsLearn->keyPressed (juce::KeyPress (' ')));
-    CHECK (bandsLearn->getToggleState());
-    CHECK (bandsLearnParameter->getValue() == doctest::Approx (1.0f));
-    CHECK (learnGestures.starts == 1);
-    CHECK (learnGestures.ends == 1);
-    bandsLearnParameter->removeListener (&learnGestures);
-    bandMode->setSelectedItemIndex (2, juce::sendNotificationSync);
-
-    juce::Component* activity = nullptr;
-    juce::Label* bandsStatus = nullptr;
-    for (auto* child : editor->getChildren())
-    {
-        if (child->getName() == "Suppression activity")
-            activity = child;
-        if (child->getName() == "Multiband learning status")
-            bandsStatus = dynamic_cast<juce::Label*> (child);
-    }
-    REQUIRE (activity != nullptr);
-    REQUIRE (bandsStatus != nullptr);
-    CHECK (activity->getDescription().containsIgnoreCase ("learn armed"));
-    CHECK (activity->getDescription().containsIgnoreCase ("gain reduction unavailable"));
-    CHECK (activity->getDescription().containsIgnoreCase ("passes while processing"));
-    CHECK (bandsStatus->getText().containsIgnoreCase ("armed"));
-    CHECK_FALSE (bandsStatus->getText().containsIgnoreCase ("capturing"));
-
-    auto* delta = dynamic_cast<juce::Button*> (editor->findChildWithID ("deltaAudition"));
-    REQUIRE (delta != nullptr);
-    delta->setToggleState (true, juce::sendNotificationSync);
-    bandMode->setSelectedItemIndex (1, juce::sendNotificationSync);
-    CHECK (activity->getDescription().containsIgnoreCase ("output: removed signal"));
-
-    gestures.reset();
-    {
-        auto dragEvent = makeMouseEvent (
-            *strength, juce::ModifierKeys (juce::ModifierKeys::leftButtonModifier), 1);
-        strength->mouseDown (dragEvent);
-    }
-    CHECK (gestures.starts == 1);
-    CHECK (gestures.ends == 0);
+    listenParam->removeListener (&buttonGestures);
+    dial->mouseDown (event (*dial));
+    editor->setVisible (false);
+    CHECK (gestures.starts == gestures.ends);
+    editor->setVisible (true);
+    dial->mouseDown (event (*dial));
+    CHECK (gestures.starts == gestures.ends + 1);
     editor.reset();
-    CHECK (gestures.ends == 1);
-    strengthParameter->removeListener (&gestures);
+    CHECK (gestures.starts == gestures.ends);
+    param.removeListener (&gestures);
 }
 
-TEST_CASE ("declared host scale factors preserve logical layout and render cleanly")
+TEST_CASE ("processor metering follows actual output without altering DSP")
 {
     juce::ScopedJuceInitialiser_GUI gui;
-    const std::array scales { 1.0f, 1.25f, 1.5f, 1.75f, 2.0f };
-
-    for (const auto scale : scales)
+    SuppressorProcessor p;
+    prepare (p);
+    suppressor::DenoiserEngine reference;
+    reference.prepare (48000, 2, 120);
+    suppressor::EngineParams targets;
+    targets.strength01 = p.apvts.getRawParameterValue ("strength")->load();
+    reference.setTargets (targets);
+    reference.reset();
+    juce::AudioBuffer<float> audio (2, 256), expected (2, 256);
+    juce::MidiBuffer midi;
+    float* io[] { expected.getWritePointer (0), expected.getWritePointer (1) };
+    for (int block = 0; block < 50; ++block)
     {
-        CAPTURE (scale);
-        SuppressorProcessor processor;
-        auto editor = std::make_unique<SuppressorEditor> (processor);
-        const auto width = juce::roundToInt (1000.0f * scale);
-        const auto height = juce::roundToInt (640.0f * scale);
-        editor->setVisible (true);
-        editor->setScaleFactor (scale);
-
-        CHECK (editor->getWidth() == 1000);
-        CHECK (editor->getHeight() == 640);
-        const auto transformedBounds = editor->getLocalBounds().toFloat().transformedBy (
-            editor->getTransform());
-        CHECK (transformedBounds.getWidth() == doctest::Approx (width));
-        CHECK (transformedBounds.getHeight() == doctest::Approx (height));
-
-        juce::Image image (juce::Image::ARGB, width, height, true);
-        {
-            juce::Graphics graphics (image);
-            graphics.addTransform (juce::AffineTransform::scale (scale));
-            editor->paintEntireComponent (graphics, true);
-        }
-        CHECK (image.getPixelAt (width - 2, height - 2).getAlpha() == 0xff);
-        CHECK (countPixelsNear (image, SuppressorTheme::accent)
-               > juce::roundToInt (100.0f * scale * scale));
-
-        const auto captureDirectory = juce::SystemStats::getEnvironmentVariable (
-            "SUPPRESSOR_UI_CAPTURE_DIR", {});
-        auto captureSucceeded = true;
-        if (captureDirectory.isNotEmpty())
-        {
-            const auto directory = juce::File (captureDirectory);
-            captureSucceeded = directory.createDirectory().wasOk();
-            auto output = directory.getChildFile (
-                "suppressor-ui-" + juce::String (juce::roundToInt (scale * 100.0f))
-                + ".png");
-            juce::PNGImageFormat format;
-            auto stream = output.createOutputStream();
-            captureSucceeded = captureSucceeded && stream != nullptr;
-            if (stream != nullptr)
-                captureSucceeded = captureSucceeded
-                                   && format.writeImageToStream (image, *stream);
-        }
-        CHECK (captureSucceeded);
+        for (int ch = 0; ch < 2; ++ch)
+            for (int n = 0; n < 256; ++n)
+                audio.setSample (ch, n, static_cast<float> (.03 * std::sin ((block * 256 + n) * .12)));
+        expected.makeCopyOf (audio);
+        reference.setTargets (targets);
+        reference.processBlock (io, nullptr, 0, 256, 2);
+        p.processBlock (audio, midi);
+        for (int ch = 0; ch < 2; ++ch)
+            CHECK (std::equal (audio.getReadPointer (ch), audio.getReadPointer (ch) + 256, expected.getReadPointer (ch)));
     }
+    for (bool delta : { false, true })
+    {
+        p.releaseResources();
+        prepare (p);
+        setParameter (p, "deltaAudition", delta ? 1.0f : 0.0f);
+        setParameter (p, "outputGain", 6);
+        audio.clear();
+        audio.setSample (1, 0, .8f);
+        p.processBlock (audio, midi);
+        suppressor::MeterSnapshot s;
+        REQUIRE (p.readMeters (s));
+        CHECK (s.input == doctest::Approx (.8f));
+        CHECK (s.output == doctest::Approx (audio.getMagnitude (0, 256)));
+        CHECK (((s.flags & suppressor::MeterSnapshot::removed) != 0) == delta);
+    }
+    p.releaseResources();
+    suppressor::MeterSnapshot s;
+    REQUIRE (p.readMeters (s));
+    CHECK (s.flags == 0);
+}
+
+TEST_CASE ("live meter states, stale data, legacy modes and monitor labels are explicit")
+{
+    juce::ScopedJuceInitialiser_GUI gui;
+    SuppressorProcessor p;
+    prepare (p);
+    auto editor = std::make_unique<SuppressorEditor> (p);
+    editor->addToDesktop (0);
+    editor->setVisible (true);
+    pump();
+    juce::Component::unfocusAllComponents();
+    auto* status = namedLabel (*editor, "Processing status");
+    auto* summary = namedLabel (*editor, "Signal meters");
+    REQUIRE (status != nullptr);
+    REQUIRE (summary != nullptr);
+    CHECK (status->getText() == "No audio");
+    capture (*editor, "suppressor-default");
+    feed (p);
+    expectStatus (*status, "Suppressing");
+    CHECK (summary->getDescription().contains ("High-band reduction"));
+    capture (*editor, "suppressor-ui");
+    for (float scale : { 1.0f, 1.25f, 1.5f, 1.75f, 2.0f })
+    {
+        editor->setScaleFactor (scale);
+        CHECK (editor->getWidth() == 640);
+        CHECK (editor->getLocalBounds().toFloat().transformedBy (editor->getTransform()).getWidth()
+               == doctest::Approx (640 * scale));
+        capture (*editor, "suppressor-scale-" + juce::String (juce::roundToInt (scale * 100)), scale);
+    }
+    editor->setScaleFactor (1);
+    setParameter (p, "deltaAudition", 1);
+    expectStatus (*status, "No audio"); // old output is not relabelled as removed audio
+    feed (p);
+    expectStatus (*status, "Listening to difference");
+    CHECK (summary->getDescription().contains ("removed"));
+    capture (*editor, "suppressor-delta-audition");
+    feed (p, 120, false, true);
+    expectStatus (*status, "Bypassed");
+    capture (*editor, "suppressor-bypassed");
+    setParameter (p, "deltaAudition", 0);
+    feed (p, 700, true);
+    expectStatus (*status, "No input");
+    capture (*editor, "suppressor-silence");
+    setParameter (p, "bandMode", 1); setParameter (p, "bandsLearn", 1);
+    feed (p);
+    expectStatus (*status, "Learning bands");
+    CHECK (summary->getDescription().contains ("unavailable"));
+    CHECK_FALSE (editor->findChildWithID ("threshold")->isEnabled());
+    CHECK_FALSE (editor->findChildWithID ("strength")->isEnabled());
+    CHECK (namedLabel (*editor, "Host settings")->getText() == "Host settings active");
+    capture (*editor, "suppressor-learning");
+    setParameter (p, "bandsLearn", 0); feed (p);
+    CHECK (waitFor ([&] { return summary->getDescription().contains ("Maximum band reduction"); }));
+    expectStatus (*status, "No audio");
+    CHECK (summary->getDescription() == "No current audio readings");
+    editor.reset();
+    editor = std::make_unique<SuppressorEditor> (p);
+    editor->addToDesktop (0);
+    editor->setVisible (true); pump();
+    CHECK (namedLabel (*editor, "Processing status")->getText() == "No audio");
+}
+
+TEST_CASE ("sidechain levels are excluded and clipping is visible and accessible")
+{
+    juce::ScopedJuceInitialiser_GUI gui;
+    SuppressorProcessor p;
+    auto layout = p.getBusesLayout();
+    layout.inputBuses.set (1, juce::AudioChannelSet::stereo());
+    REQUIRE (p.setBusesLayout (layout));
+    prepare (p);
+    SuppressorEditor editor (p);
+    editor.addToDesktop (0);
+    editor.setVisible (true);
+    juce::AudioBuffer<float> buffer (4, 256);
+    juce::MidiBuffer midi;
+    buffer.clear();
+    buffer.setSample (0, 0, .25f);
+    buffer.setSample (2, 0, 4.0f);
+    p.processBlock (buffer, midi);
+    suppressor::MeterSnapshot meters;
+    REQUIRE (p.readMeters (meters));
+    CHECK (meters.input == doctest::Approx (.25f));
+    CHECK ((meters.flags & suppressor::MeterSnapshot::inputClip) == 0);
+    buffer.clear();
+    buffer.setSample (1, 0, 1.25f);
+    p.processBlockBypassed (buffer, midi);
+    pump();
+    auto* summary = namedLabel (editor, "Signal meters");
+    REQUIRE (summary != nullptr);
+    CHECK (waitFor ([&] { return summary->getDescription().contains ("Input clipped")
+                             && summary->getDescription().contains ("Output clipped"); }));
+    capture (editor, "suppressor-clipping");
+    for (float value : { 0.0f, 1.0f })
+    {
+        for (const char* id : { "threshold", "strength", "release" })
+            p.apvts.getParameter (id)->setValueNotifyingHost (value);
+        pump();
+        capture (editor, value > .5f ? "suppressor-maximum" : "suppressor-minimum");
+    }
+}
+
+TEST_CASE ("VST3 native editor lifecycle and host parameter state recall")
+{
+    const auto path = juce::SystemStats::getEnvironmentVariable ("SUPPRESSOR_VST3_PATH", {});
+    if (path.isEmpty()) return;
+    juce::ScopedJuceInitialiser_GUI gui;
+    juce::VST3PluginFormat format;
+    juce::OwnedArray<juce::PluginDescription> types;
+    format.findAllTypesForFile (types, path);
+    REQUIRE (types.size() == 1);
+    juce::String errorMessage;
+    auto p = format.createInstanceFromDescription (*types[0], 48000, 256, errorMessage);
+    INFO (errorMessage);
+    REQUIRE (p != nullptr);
+    prepare (*p);
+    juce::Component hostWindow;
+    hostWindow.setBounds (80, 80, 640, 460);
+    hostWindow.addToDesktop (0);
+    hostWindow.setVisible (true);
+    pump();
+    for (int reopen = 0; reopen < 3; ++reopen)
+    {
+        std::unique_ptr<juce::AudioProcessorEditor> editor (p->createEditorIfNeeded());
+        REQUIRE (editor != nullptr);
+        // Exercise embedding in the host's native window, rather than making
+        // the VST3 adapter itself the top-level window.
+        hostWindow.addAndMakeVisible (*editor);
+        pump();
+        feed (*p); pump();
+        CHECK (editor->getWidth() == 640);
+        CHECK (editor->getHeight() == 460);
+        // This is the host's native embedding view, not the plugin's JUCE
+        // component tree. Exercise the real wrapper rather than casting it.
+        REQUIRE (p->getParameters().size() == 21); // includes VST3 wrapper bypass
+        auto* parameter = p->getParameters()[1];
+        CHECK (parameter->getName (64) == "Threshold");
+        parameter->setValueNotifyingHost (.6f);
+        feed (*p); pump();
+        juce::MemoryBlock state;
+        p->getStateInformation (state);
+        const auto saved = parameter->getValue();
+        parameter->setValueNotifyingHost (.8f);
+        feed (*p); pump();
+        CHECK (parameter->getValue() == doctest::Approx (.8f));
+        p->setStateInformation (state.getData(), static_cast<int> (state.getSize()));
+        feed (*p); pump();
+        CHECK (parameter->getValue() == doctest::Approx (saved));
+        editor->setVisible (false);
+        pump();
+        editor->setVisible (true);
+        pump();
+    }
+    p->releaseResources();
 }

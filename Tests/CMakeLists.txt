@@ -12,9 +12,11 @@ add_executable(suppressor-tests
     test_engine.cpp
     test_hum.cpp
     test_multiband.cpp
-    test_cue.cpp)
+    test_cue.cpp
+    test_metering.cpp)
 
-target_link_libraries(suppressor-tests PRIVATE suppressor-dsp doctest::doctest)
+find_package(Threads REQUIRED)
+target_link_libraries(suppressor-tests PRIVATE suppressor-dsp doctest::doctest Threads::Threads)
 target_include_directories(suppressor-tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 
 add_test(NAME suppressor-dsp-unit COMMAND suppressor-tests)
