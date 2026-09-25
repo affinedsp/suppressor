@@ -41,7 +41,6 @@ public:
 
     // Bounded, race-free telemetry; never expose mutable DSP state to the editor.
     bool readMeters (suppressor::MeterSnapshot& result) const noexcept { return meters.read (result); }
-    float meterSampleRate() const noexcept { return displaySampleRate.load(); }
 
     static juce::AudioProcessorValueTreeState::ParameterLayout createParameterLayout();
 
@@ -52,7 +51,6 @@ private:
     suppressor::DenoiserEngine engine;
 
     suppressor::Metering meters;
-    std::atomic<float> displaySampleRate { 44100.0f };
     std::atomic<bool>  latencyDirty { false };
     std::atomic<bool>  humAutoFinished { false };
 

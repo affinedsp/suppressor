@@ -120,7 +120,6 @@ void SuppressorProcessor::prepareToPlay (double sampleRate, int samplesPerBlock)
     juce::ignoreUnused (samplesPerBlock);
     if (sampleRate <= 0.0)
         return; // stress hosts may probe 0/0: keep the previous state
-    displaySampleRate.store (static_cast<float> (sampleRate));
     engine.prepare (sampleRate, 2, (int) std::ceil (0.0025 * sampleRate));
     currentLatency = (int) std::round (apvts.getRawParameterValue ("lookahead")->load()
                                        * 0.001 * sampleRate);

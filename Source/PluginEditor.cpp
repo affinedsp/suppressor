@@ -344,11 +344,6 @@ void SuppressorEditor::paint (juce::Graphics& g)
     label (g, "Threshold", { 24, 259, 192, 22 }, 18.0f, text, juce::Justification::centred);
     label (g, "Strength", { 224, 259, 192, 22 }, 18.0f, text, juce::Justification::centred);
     label (g, "Release", { 424, 259, 192, 22 }, 18.0f, text, juce::Justification::centred);
-    label (g, multi ? "One-split only" : "Reduce highs below this level", { 24, 388, 192, 17 }, 14.0f, secondary, juce::Justification::centred);
-    const auto cutoff = suppressor::DenoiserEngine::strengthToCutoff (strength.getValue(),
-        proc.meterSampleRate());
-    label (g, multi ? "One-split only" : "Above " + juce::String (cutoff / 1000.0, 1) + " kHz", { 224, 388, 192, 17 }, 14.0f, secondary, juce::Justification::centred);
-    label (g, "How quickly highs close", { 424, 388, 192, 17 }, 14.0f, secondary, juce::Justification::centred);
     label (g, bypass ? "Monitor: dry input" : audition ? "Monitor: input minus processed" : "Monitor: processed signal",
            { 196, 419, 265, 20 }, 15.0f, audition ? warning : secondary);
 }
