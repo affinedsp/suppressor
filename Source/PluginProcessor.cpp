@@ -120,15 +120,17 @@ void SuppressorProcessor::prepareToPlay (double sampleRate, int samplesPerBlock)
     juce::ignoreUnused (samplesPerBlock);
     if (sampleRate <= 0.0)
         return; // stress hosts may probe 0/0: keep the previous state
+    displaySampleRate.store (static_cast<float> (sampleRate));
     engine.prepare (sampleRate, 2, (int) std::ceil (0.0025 * sampleRate));
     currentLatency = (int) std::round (apvts.getRawParameterValue ("lookahead")->load()
                                        * 0.001 * sampleRate);
     setLatencySamples (currentLatency);
     engine.setTargets (readTargets (sampleRate));
     engine.reset();
+    meters.reset();
 }
 
-void SuppressorProcessor::releaseResources() {}
+void SuppressorProcessor::releaseResources() { meters.reset(); }
 
 bool SuppressorProcessor::isBusesLayoutSupported (const BusesLayout& layouts) const
 {
@@ -244,15 +246,24 @@ void SuppressorProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::
         if (numSc > 1) sc[1] = scBus.getReadPointer (1);
     }
 
+    const float inputPeak = mainBus.getMagnitude (0, mainBus.getNumSamples());
     engine.processBlock (io, sc, numSc, buffer.getNumSamples(), numMain);
 
-    detectorDbAtomic.store (engine.detectorLevelDb());
-    grDbAtomic.store (engine.gainReductionDb());
+    using M = suppressor::MeterSnapshot;
+    uint32_t flags = targets.deltaAudition ? M::removed : 0u;
+    if (targets.bandMode != 0) flags |= M::multiband;
+    if (targets.bandMode != 0 && engine.multi (0).learning()) flags |= M::learning;
+    meters.push (inputPeak, mainBus.getMagnitude (0, mainBus.getNumSamples()),
+                 -engine.gainReductionDb(), buffer.getNumSamples(), fs, flags);
 }
 
-void SuppressorProcessor::processBlockBypassed (juce::AudioBuffer<float>&, juce::MidiBuffer& midi)
+void SuppressorProcessor::processBlockBypassed (juce::AudioBuffer<float>& buffer, juce::MidiBuffer& midi)
 {
     midi.clear();
+    auto mainBus = getBusBuffer (buffer, true, 0);
+    const float peak = mainBus.getMagnitude (0, mainBus.getNumSamples());
+    meters.push (peak, peak, 0.0f, buffer.getNumSamples(), getSampleRate(),
+                 suppressor::MeterSnapshot::bypassed);
 }
 
 void SuppressorProcessor::handleAsyncUpdate()
@@ -262,30 +273,6 @@ void SuppressorProcessor::handleAsyncUpdate()
     if (humAutoFinished.exchange (false))
         if (auto* prm = apvts.getParameter ("humLearn"))
             prm->setValueNotifyingHost (0.0f);
-}
-
-// ------------------------------------------------------------------------
-bool SuppressorProcessor::humLearning() const noexcept { return humLearningNow; }
-bool SuppressorProcessor::humLocked() const noexcept
-{
-    if (engine.numChannels() == 0) return false;
-    return const_cast<suppressor::DenoiserEngine&> (engine).hum (0).locked();
-}
-bool SuppressorProcessor::bandsLearning() const noexcept { return bandsLearningNow; }
-bool SuppressorProcessor::bandsLocked() const noexcept
-{
-    if (engine.numChannels() == 0) return false;
-    return const_cast<suppressor::DenoiserEngine&> (engine).multi (0).locked();
-}
-int SuppressorProcessor::humActiveDips() const noexcept
-{
-    if (engine.numChannels() == 0) return 0;
-    return const_cast<suppressor::DenoiserEngine&> (engine).hum (0).activeHarmonicCount();
-}
-double SuppressorProcessor::humDetectedBaseHz() const noexcept
-{
-    if (engine.numChannels() == 0) return 60.0;
-    return const_cast<suppressor::DenoiserEngine&> (engine).hum (0).baseHz();
 }
 
 // ------------------------------------------------------------------------

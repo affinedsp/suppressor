@@ -5,10 +5,10 @@ high-gain amp-sim and reamping chains. It sits on the raw DI *before* the amp
 sim, strips pickup-borne hiss/buzz/EMI between notes, and leaves the guitar
 body alone. Formats: **VST3** and **CLAP** (Windows, macOS, Linux).
 
-[![CI](https://github.com/user1303836/suppressor/actions/workflows/ci.yml/badge.svg)](https://github.com/user1303836/suppressor/actions/workflows/ci.yml)
+[![CI](https://github.com/affinedsp/suppressor/actions/workflows/ci.yml/badge.svg)](https://github.com/affinedsp/suppressor/actions/workflows/ci.yml)
 
 <p align="center">
-  <img src="docs/images/suppressor-ui.png" alt="Suppressor plugin interface" width="900">
+  <img src="docs/images/suppressor-ui.png" alt="Suppressor: three essential knobs, input/output peak meters, and a clearly labelled high-band reduction display" width="640">
 </p>
 
 ## What it does
@@ -30,14 +30,28 @@ biquads plus an envelope per channel).
 
 ## Controls
 
-| Section | Controls |
+| Control | What it does |
 |---|---|
-| **Core** | Strength (crossover 8 kHz → 1.4 kHz), Threshold, Release (2–30 ms, exponential) |
-| **Gate** | Reduction / Tight Gate mode, Depth floor, Hysteresis, Hold, Adaptive Release |
-| **Detection** | Transient Cue, internal/external detector source, 0/1/2 ms lookahead |
-| **Hum Removal** | Learn-and-lock resonant dips on the 50/60 Hz family, strength, harmonic count |
-| **Multiband** | Optional 4/6-band learned-threshold mode (advanced; one-split is the default) |
-| **Output** | Delta (removed-signal) audition, output gain, detector/GR metering |
+| **Threshold** | Sets when highs are reduced. Raise it until noise between notes is suppressed. |
+| **Strength** | Sets how much of the high-frequency range is treated (8 kHz → 1.4 kHz). Zero is not bypass. |
+| **Release** | Sets how quickly suppression returns after a note (2–30 ms). Increase it to preserve tails. |
+| **Listen removed** | Auditions input minus processed audio; switch it off to hear the processed signal. This difference includes filter phase effects, not just noise. |
+
+Input and output meters show **peak dBFS**. The large readout shows
+**high-band gain reduction**, not whole-signal loudness loss; in multiband
+sessions it shows the deepest band reduction. Clip warnings, bypass, silence,
+learning, and stopped audio are labelled explicitly. Stopped meters clear
+instead of holding stale readings.
+
+Drag a dial to adjust; **Shift-drag** for fine control, **double-click / Return**
+for exact entry, and **Alt/Option-click / Home** to reset. Tab and arrow keys
+work too. Use your host's bypass to compare with the dry input.
+
+Existing sessions and automation remain compatible. The additional engine
+settings remain available in the host's parameter view, not in the simplified
+editor. **Host settings active** indicates non-default legacy settings; hover
+for details. In multiband mode, Threshold and Strength are inactive because
+that mode uses its own splits and learned thresholds.
 
 ## Building
 
@@ -57,6 +71,17 @@ Outputs land in `build/Source/Suppressor_artefacts/Release/{VST3,CLAP,Standalone
 cmake -S . -B build-tests -G Ninja -DSUPPRESSOR_BUILD_PLUGIN=OFF -DSUPPRESSOR_BUILD_TESTS=ON
 cmake --build build-tests && ctest --test-dir build-tests --output-on-failure
 ```
+
+### UI and wrapper tests
+
+```bash
+cmake --build build --target SuppressorUITests
+ctest --test-dir build --output-on-failure
+```
+
+These also exercise native VST3/CLAP editor embedding. Linux needs a display
+(or `xvfb-run -a`). Set `SUPPRESSOR_UI_CAPTURE_DIR` to an absolute directory to
+save real editor captures at 100–200% scaling.
 
 ### CI
 
