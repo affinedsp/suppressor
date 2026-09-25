@@ -59,7 +59,7 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y ninja-build pkg-config xvfb openbox x11-utils \
+          sudo apt-get install -y ninja-build pkg-config xvfb openbox x11-utils gdb \
             libasound2-dev libx11-dev libxext-dev libxinerama-dev libxrandr-dev \
             libxcursor-dev libgl1-mesa-dev libfreetype6-dev libfontconfig1-dev
 
@@ -118,7 +118,15 @@ jobs:
                 echo "Window manager did not start"
                 exit 1
               fi
-              ctest --test-dir build --output-on-failure -C Release -R suppressor-ui-unit
+              if ! ctest --test-dir build --output-on-failure -C Release -R suppressor-ui-unit; then
+                # Native X11 errors terminate the process rather than fail an
+                # assertion. Collect a stack while keeping the test gate failed.
+                export SUPPRESSOR_VST3_PATH="$PWD/build/Source/Suppressor_artefacts/Release/VST3/suppressor.vst3"
+                export SUPPRESSOR_CLAP_PATH="$PWD/build/Source/Suppressor_artefacts/Release/CLAP/suppressor.clap"
+                gdb --batch -ex "set breakpoint pending on" -ex "break _XDefaultError" \
+                  -ex run -ex bt --args build/Source/SuppressorUITests --success || true
+                exit 1
+              fi
             '
           else
             ctest --test-dir build --output-on-failure -C Release -R suppressor-ui-unit

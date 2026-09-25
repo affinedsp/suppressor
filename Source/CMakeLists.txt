@@ -74,7 +74,8 @@ if (SUPPRESSOR_BUILD_TESTS)
         JUCE_MODAL_LOOPS_PERMITTED=1
         JUCE_PLUGINHOST_VST3=1)
 
-    add_test(NAME suppressor-ui-unit COMMAND SuppressorUITests)
+    # Keep assertion context in CTest's failure log, including native-window exits.
+    add_test(NAME suppressor-ui-unit COMMAND SuppressorUITests --success)
     set_tests_properties(suppressor-ui-unit PROPERTIES ENVIRONMENT
         "SUPPRESSOR_VST3_PATH=$<TARGET_GENEX_EVAL:Suppressor_VST3,$<TARGET_PROPERTY:Suppressor_VST3,JUCE_PLUGIN_ARTEFACT_FILE>>")
     add_dependencies(SuppressorUITests Suppressor_VST3)
