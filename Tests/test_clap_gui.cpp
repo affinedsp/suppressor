@@ -1,5 +1,5 @@
 #include <doctest/doctest.h>
-#include <juce_gui_basics/juce_gui_basics.h>
+#include "PluginEditor.h"
 #include <clap/clap.h>
 
 namespace
@@ -40,7 +40,7 @@ TEST_CASE ("CLAP embeds, hides, reopens and destroys the actual native editor")
     if (path.isEmpty()) return;
     juce::ScopedJuceInitialiser_GUI initialiser;
     juce::Component parent;
-    parent.setBounds (80, 80, 640, 460);
+    parent.setBounds (80, 80, SuppressorEditor::width, SuppressorEditor::height);
     parent.addToDesktop (0);
     parent.setVisible (true);
     ClapHost h;
@@ -79,8 +79,8 @@ TEST_CASE ("CLAP embeds, hides, reopens and destroys the actual native editor")
         REQUIRE (h.created);
         uint32_t width = 0, height = 0;
         REQUIRE (h.gui->get_size (h.plugin, &width, &height));
-        CHECK (width == 640);
-        CHECK (height == 460);
+        CHECK (width == SuppressorEditor::width);
+        CHECK (height == SuppressorEditor::height);
         CHECK_FALSE (h.gui->can_resize (h.plugin));
         REQUIRE (h.gui->set_parent (h.plugin, &window));
         REQUIRE (h.gui->show (h.plugin));

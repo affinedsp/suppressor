@@ -44,5 +44,6 @@ if (SUPPRESSOR_BUILD_PLUGIN)
         FetchContent_MakeAvailable(clap-juce-extensions)
     endif()
 
+    include(libs/affine-ui/AffineUI.cmake)
     add_subdirectory(Source)
 endif()

@@ -77,6 +77,10 @@ void capture (juce::Component& editor, const juce::String& name, float scale = 1
 {
     const auto path = juce::SystemStats::getEnvironmentVariable ("SUPPRESSOR_UI_CAPTURE_DIR", {});
     if (path.isEmpty()) return;
+    // Show the steady state rather than a frame of the needle's ballistics.
+    for (auto* child : editor.getChildren())
+        if (auto* meter = dynamic_cast<affine::NeedleMeter*> (child))
+            meter->settle();
     auto dir = juce::File (path);
     REQUIRE (dir.createDirectory().wasOk());
     const auto image = editor.createComponentSnapshot (editor.getLocalBounds(), true, scale);
@@ -100,12 +104,21 @@ float contrast (juce::Colour a, juce::Colour b)
 
 TEST_CASE ("theme retains bundled fonts and accessible contrast")
 {
-    using namespace SuppressorTheme;
-    CHECK (makeFont (18).getTypefaceName() == "Barlow Condensed");
-    CHECK (makeFont (18).getTypefaceStyle() != makeFont (18, true).getTypefaceStyle());
-    for (auto colour : { primaryText, secondaryText, accent, warning, error })
-        CHECK (contrast (colour, surface) >= 4.5f);
-    CHECK (contrast (controlOutline, surfaceRaised) >= 3.0f);
+    CHECK (affine::fonts::label (18).getTypefaceName() == "Barlow Condensed");
+    CHECK (affine::fonts::label (18).getTypefaceStyle() != affine::fonts::text (18).getTypefaceStyle());
+    CHECK (affine::fonts::wordmark (18).getTypefaceName() == "Michroma");
+    CHECK (affine::fonts::readout (18).getTypefaceName() == "Share Tech Mono");
+    const auto theme = SuppressorTheme::theme();
+    const auto& palette = theme.palette;
+    // Printed legends on the anodised plate, including its darker lower edge.
+    for (auto plate : { theme.panel.base, theme.panel.base.darker (0.25f) })
+    {
+        CHECK (contrast (palette.silkscreen, plate) >= 4.5f);
+        CHECK (contrast (palette.silkscreenDim, plate) >= 4.5f);
+    }
+    // Emitted readouts and lamps on display glass.
+    for (auto colour : { palette.accent, palette.attention, palette.danger, palette.silkscreen })
+        CHECK (contrast (colour, palette.glass) >= 4.5f);
 }
 
 TEST_CASE ("four controls preserve the complete host parameter and saved-state contract")
@@ -120,8 +133,8 @@ TEST_CASE ("four controls preserve the complete host parameter and saved-state c
         "humLearn", "bandMode", "bandsLearn", "deltaAudition", "outputGain" };
     const std::array<float, 20> defaults { .9f, -40, 6, 0, 40, 6, 2, 0, 0, 0, 0, 0, 0, 8, 1, 0, 0, 0, 0, 0 };
     REQUIRE (p.getParameters().size() == ids.size());
-    CHECK (editor.getWidth() == 640);
-    CHECK (editor.getHeight() == 460);
+    CHECK (editor.getWidth() == SuppressorEditor::width);
+    CHECK (editor.getHeight() == SuppressorEditor::height);
     CHECK_FALSE (editor.isResizable());
     std::set<int> focus;
     int controls = 0;
@@ -164,7 +177,7 @@ TEST_CASE ("dials support balanced drag, fine, exact, cancel, invalid, reset and
     auto editor = std::make_unique<SuppressorEditor> (p);
     editor->addToDesktop (0);
     editor->setVisible (true);
-    auto* dial = dynamic_cast<SuppressorDial*> (editor->findChildWithID ("strength"));
+    auto* dial = dynamic_cast<affine::Knob*> (editor->findChildWithID ("strength"));
     REQUIRE (dial != nullptr);
     auto& param = dial->parameter;
     Gestures gestures;
@@ -183,7 +196,7 @@ TEST_CASE ("dials support balanced drag, fine, exact, cancel, invalid, reset and
     CHECK (dial->getValue() == doctest::Approx (.61));
     CHECK (dial->keyPressed (juce::KeyPress (juce::KeyPress::rightKey)));
     CHECK (dial->getValue() == doctest::Approx (.62));
-    auto* threshold = dynamic_cast<SuppressorDial*> (editor->findChildWithID ("threshold"));
+    auto* threshold = dynamic_cast<affine::Knob*> (editor->findChildWithID ("threshold"));
     REQUIRE (threshold != nullptr);
     threshold->mouseDown (event (*threshold));
     for (int pixel = 1; pixel <= 6; ++pixel)
@@ -313,9 +326,9 @@ TEST_CASE ("live meter states, stale data, legacy modes and monitor labels are e
     for (float scale : { 1.0f, 1.25f, 1.5f, 1.75f, 2.0f })
     {
         editor->setScaleFactor (scale);
-        CHECK (editor->getWidth() == 640);
+        CHECK (editor->getWidth() == SuppressorEditor::width);
         CHECK (editor->getLocalBounds().toFloat().transformedBy (editor->getTransform()).getWidth()
-               == doctest::Approx (640 * scale));
+               == doctest::Approx (SuppressorEditor::width * scale));
         capture (*editor, "suppressor-scale-" + juce::String (juce::roundToInt (scale * 100)), scale);
     }
     editor->setScaleFactor (1);
@@ -405,7 +418,7 @@ TEST_CASE ("VST3 native editor lifecycle and host parameter state recall")
     REQUIRE (p != nullptr);
     prepare (*p);
     juce::Component hostWindow;
-    hostWindow.setBounds (80, 80, 640, 460);
+    hostWindow.setBounds (80, 80, SuppressorEditor::width, SuppressorEditor::height);
     hostWindow.addToDesktop (0);
     hostWindow.setVisible (true);
     pump();
@@ -418,8 +431,8 @@ TEST_CASE ("VST3 native editor lifecycle and host parameter state recall")
         hostWindow.addAndMakeVisible (*editor);
         pump();
         feed (*p); pump();
-        CHECK (editor->getWidth() == 640);
-        CHECK (editor->getHeight() == 460);
+        CHECK (editor->getWidth() == SuppressorEditor::width);
+        CHECK (editor->getHeight() == SuppressorEditor::height);
         // This is the host's native embedding view, not the plugin's JUCE
         // component tree. Exercise the real wrapper rather than casting it.
         REQUIRE (p->getParameters().size() == 21); // includes VST3 wrapper bypass
