@@ -5,7 +5,7 @@
 
 namespace SuppressorTheme
 {
-/** Graphite anodising with a glacier-cyan emission: the Suppressor finish of the Affine family. */
+/** Hi-Fi finish: a black glass front with polished end caps, blue-lit meters and silver knobs. */
 affine::Theme theme();
 }
 
@@ -25,7 +25,7 @@ public:
     void visibilityChanged() override;
     int getControlParameterIndex (juce::Component&) override;
 
-    static constexpr int width = 800, height = 530;
+    static constexpr int width = 880, height = 540;
 
 private:
     void timerCallback() override;
@@ -38,8 +38,9 @@ private:
     ListenButton listen;
     juce::AudioProcessorValueTreeState::ButtonAttachment listenAttachment;
     affine::NeedleMeter reduction;
-    affine::LadderMeter inputLadder, outputLadder;
-    affine::DisplayLabel status, inputPeak, outputPeak, hostSettings;
+    affine::LadderMeter inputBar, outputBar;
+    affine::IlluminatedLegends status;
+    affine::DisplayLabel inputPeak, outputPeak, hostSettings;
     juce::Label meterSummary;
     juce::TooltipWindow tooltips { this, 700 };
     suppressor::MeterSnapshot meter;
