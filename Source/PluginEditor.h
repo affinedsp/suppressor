@@ -5,7 +5,7 @@
 
 namespace SuppressorTheme
 {
-/** Stealth finish: matte powder coat, white LED rings and a colour screen. */
+/** The family theme with Suppressor's teal screen. */
 affine::Theme theme();
 }
 

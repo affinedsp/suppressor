@@ -110,10 +110,6 @@ void capture (juce::Component& editor, const juce::String& name, float scale = 1
 {
     const auto path = juce::SystemStats::getEnvironmentVariable ("SUPPRESSOR_UI_CAPTURE_DIR", {});
     if (path.isEmpty()) return;
-    // Show the steady state rather than a frame of the needle's ballistics.
-    for (auto* child : editor.getChildren())
-        if (auto* meter = dynamic_cast<affine::NeedleMeter*> (child))
-            meter->settle();
     auto dir = juce::File (path);
     REQUIRE (dir.createDirectory().wasOk());
     const auto image = editor.createComponentSnapshot (editor.getLocalBounds(), true, scale);
@@ -143,14 +139,14 @@ TEST_CASE ("theme retains bundled fonts and accessible contrast")
     CHECK (affine::fonts::readout (18).getTypefaceName() == "Share Tech Mono");
     const auto theme = SuppressorTheme::theme();
     const auto& palette = theme.palette;
-    // Printed legends on the anodised plate, including its darker lower edge.
+    // Printed legends on the panel, including its darker lower edge.
     for (auto plate : { theme.panel.base, theme.panel.base.darker (0.25f) })
     {
         CHECK (contrast (palette.silkscreen, plate) >= 4.5f);
         CHECK (contrast (palette.silkscreenDim, plate) >= 4.5f);
     }
-    // Emitted readouts and lamps on display glass.
-    for (auto colour : { palette.accent, palette.attention, palette.danger, palette.silkscreen })
+    // Emitted readouts, the screen and lamps on display glass.
+    for (auto colour : { palette.accent, palette.screen, palette.attention, palette.danger, palette.silkscreen })
         CHECK (contrast (colour, palette.glass) >= 4.5f);
 }
 
