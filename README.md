@@ -8,7 +8,7 @@ body alone. Formats: **VST3** and **CLAP** (Windows, macOS, Linux).
 [![CI](https://github.com/affinedsp/suppressor/actions/workflows/ci.yml/badge.svg)](https://github.com/affinedsp/suppressor/actions/workflows/ci.yml)
 
 <p align="center">
-  <img src="docs/images/suppressor-ui.png" alt="Suppressor in the Stealth finish: a screen plotting six seconds of high-band reduction beside input and output bar meters, with Threshold, Strength and Release knobs and a Listen key" width="800">
+  <img src="docs/images/suppressor-ui.png" alt="Suppressor: a screen plotting six seconds of high-band reduction beside input and output bar meters, with Threshold, Strength and Release knobs and a Listen key" width="800">
 </p>
 
 ## What it does

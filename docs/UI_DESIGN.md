@@ -1,11 +1,11 @@
 # Suppressor interface
 
 The editor implements the shared [Affine design language](../libs/affine-ui/DESIGN_LANGUAGE.md)
-(v2.0) in its **Stealth** finish through the vendored `affine_ui` JUCE module. This
-document records only the Suppressor-specific decisions.
+(v3.0) through the vendored `affine_ui` JUCE module. This document records only the
+Suppressor-specific decisions.
 
 <p align="center">
-  <img src="images/suppressor-ui.png" alt="Suppressor in the Stealth finish: a matte black panel with a teal screen plotting six seconds of high-band reduction between plucked notes, input and output bar meters, three knobs with white LED rings and a Listen soft key" width="800">
+  <img src="images/suppressor-ui.png" alt="Suppressor: a matte black panel with a teal screen plotting six seconds of high-band reduction between plucked notes, input and output bar meters, three knobs with white LED rings and a Listen soft key" width="800">
 </p>
 
 ## Product
@@ -14,9 +14,8 @@ document records only the Suppressor-specific decisions.
   high-gain amplification.
 - **Primary task:** remove high-band noise between notes without losing body, sustain or
   pick attack, and check what was removed when in doubt.
-- **Finish:** modern matte hardware: black powder coat, dark knobs with white pointers
-  and white LED rings, a rubber soft key, and one colour screen. Teal appears only on the
-  screen and the *Suppressing* LED.
+- **Screen colour:** teal. It appears only on the screen and the *Suppressing* LED; the
+  rest of the panel is the family's matte black hardware.
 - **Editor:** fixed 820 × 540 logical pixels; renders natively at 100–200% and on Retina.
 
 ## Layout
