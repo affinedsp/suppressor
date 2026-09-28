@@ -1,10 +1,3 @@
-juce_add_binary_data(SuppressorAssets
-    NAMESPACE SuppressorAssets
-    HEADER_NAME SuppressorAssets.h
-    SOURCES
-        ../assets/fonts/BarlowCondensed-Regular.ttf
-        ../assets/fonts/BarlowCondensed-SemiBold.ttf)
-
 juce_add_plugin(Suppressor
     VERSION 0.1.0
     COMPANY_NAME "Suppressor Audio"
@@ -25,8 +18,7 @@ juce_add_plugin(Suppressor
 
 target_sources(Suppressor PRIVATE
     PluginProcessor.cpp
-    PluginEditor.cpp
-    PluginLookAndFeel.cpp)
+    PluginEditor.cpp)
 
 target_compile_definitions(Suppressor PUBLIC
     JUCE_WEB_BROWSER=0
@@ -36,7 +28,7 @@ target_compile_definitions(Suppressor PUBLIC
     JUCE_STRICT_REFCOUNTEDPOINTER=1)
 
 target_link_libraries(Suppressor PRIVATE
-    SuppressorAssets
+    affine_ui
     suppressor-dsp
     juce::juce_audio_utils
     juce::juce_recommended_config_flags
@@ -64,6 +56,7 @@ if (SUPPRESSOR_BUILD_TESTS)
 
     target_link_libraries(SuppressorUITests PRIVATE
         Suppressor
+        affine_ui
         doctest::doctest
         juce::juce_audio_utils
         juce::juce_recommended_config_flags

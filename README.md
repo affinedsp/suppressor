@@ -8,7 +8,7 @@ body alone. Formats: **VST3** and **CLAP** (Windows, macOS, Linux).
 [![CI](https://github.com/affinedsp/suppressor/actions/workflows/ci.yml/badge.svg)](https://github.com/affinedsp/suppressor/actions/workflows/ci.yml)
 
 <p align="center">
-  <img src="docs/images/suppressor-ui.png" alt="Suppressor: three essential knobs, input/output peak meters, and a clearly labelled high-band reduction display" width="640">
+  <img src="docs/images/suppressor-ui.png" alt="Suppressor: a screen plotting six seconds of high-band reduction beside input and output bar meters, with Threshold, Strength and Release knobs and a Listen key" width="800">
 </p>
 
 ## What it does
@@ -37,15 +37,22 @@ biquads plus an envelope per channel).
 | **Release** | Sets how quickly suppression returns after a note (2–30 ms). Increase it to preserve tails. |
 | **Listen removed** | Auditions input minus processed audio; switch it off to hear the processed signal. This difference includes filter phase effects, not just noise. |
 
-Input and output meters show **peak dBFS**. The large readout shows
-**high-band gain reduction**, not whole-signal loudness loss; in multiband
-sessions it shows the deepest band reduction. Clip warnings, bypass, silence,
-learning, and stopped audio are labelled explicitly. Stopped meters clear
-instead of holding stale readings.
+The screen plots **high-band gain reduction** over the last six seconds, not
+whole-signal loudness loss, with the current value above the plot; in multiband
+sessions it shows the deepest band reduction. The **INPUT** and **OUTPUT** bars
+show **peak dBFS** with a readout, each with a clip cell held for one second.
+While *Listen removed* is on, the output bar is relabelled **REMOVED**. Bypass,
+silence, learning, and stopped audio are labelled explicitly; the plot breaks
+wherever there was no reading, and stopped bars go dark instead of holding
+stale readings.
 
-Drag a dial to adjust; **Shift-drag** for fine control, **double-click / Return**
-for exact entry, and **Alt/Option-click / Home** to reset. Tab and arrow keys
-work too. Use your host's bypass to compare with the dry input.
+Drag a knob to adjust; **Shift-drag** for fine control, **double-click / Return**
+for exact entry in its readout, and **Alt/Option-click / Home** to reset.
+Right-click for the parameter menu, including your host's items. Tab and arrow
+keys work too. Use your host's bypass to compare with the dry input.
+
+The interface follows the shared [Affine design language](libs/affine-ui/DESIGN_LANGUAGE.md);
+see [`docs/UI_DESIGN.md`](docs/UI_DESIGN.md) for the Suppressor-specific details.
 
 Existing sessions and automation remain compatible. The additional engine
 settings remain available in the host's parameter view, not in the simplified
