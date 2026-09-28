@@ -8,7 +8,7 @@ body alone. Formats: **VST3** and **CLAP** (Windows, macOS, Linux).
 [![CI](https://github.com/affinedsp/suppressor/actions/workflows/ci.yml/badge.svg)](https://github.com/affinedsp/suppressor/actions/workflows/ci.yml)
 
 <p align="center">
-  <img src="docs/images/suppressor-ui.png" alt="Suppressor: input and output LED ladders around a backlit high-band reduction meter, with Threshold, Strength and Release knobs and a Listen removed key" width="800">
+  <img src="docs/images/suppressor-ui.png" alt="Suppressor in the Broadcast finish: input and output VU meters around a large high-band reduction meter on a hammertone rack panel, with Threshold, Strength and Release knobs and a Listen toggle" width="800">
 </p>
 
 ## What it does
@@ -37,13 +37,13 @@ biquads plus an envelope per channel).
 | **Release** | Sets how quickly suppression returns after a note (2–30 ms). Increase it to preserve tails. |
 | **Listen removed** | Auditions input minus processed audio; switch it off to hear the processed signal. This difference includes filter phase effects, not just noise. |
 
-The **IN** and **OUT** ladders show **peak dBFS**, each with a clip cell held for
-one second. The backlit meter shows **high-band gain reduction**, not
-whole-signal loudness loss; in multiband sessions it shows the deepest band
-reduction. While *Listen removed* is on, the output column is relabelled
-**REMOVED**. Bypass, silence, learning, and stopped audio are labelled
-explicitly, and stopped meters go dark (the meter lamp dims and the needle
-rests) instead of holding stale readings.
+The **INPUT** and **OUTPUT** meters show **peak dBFS**, each with a clip jewel
+held for one second. The large centre meter shows **high-band gain reduction**,
+not whole-signal loudness loss; in multiband sessions it shows the deepest band
+reduction. *Listen removed* is the Monitor toggle: up plays the removed signal
+and relabels the output meter **REMOVED**. The status window spells out bypass,
+silence, learning, and stopped audio, and stopped meters go dark (lamps dim and
+needles rest) instead of holding stale readings.
 
 Drag a knob to adjust; **Shift-drag** for fine control, **double-click / Return**
 for exact entry in its readout, and **Alt/Option-click / Home** to reset.
