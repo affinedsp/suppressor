@@ -6,27 +6,63 @@ float db (float peak) { return juce::Decibels::gainToDecibels (peak, -100.0f); }
 juce::String levelText (float peak) { return peak < 0.00001f ? "-inf" : juce::String (db (peak), 1); }
 juce::String whole (double v) { return juce::String (juce::roundToInt (v)); }
 
-// Layout, in logical pixels. The signal runs left to right across the meter bridge.
-const juce::Rectangle<int> statusArea { 548, 26, 214, 30 };
-const juce::Rectangle<int> hostSettingsArea { 548, 60, 214, 16 };
-const juce::Rectangle<int> meterArea { 218, 90, 364, 210 };
-const juce::Rectangle<int> inputColumn { 136, 110, 24, 160 }, outputColumn { 640, 110, 24, 160 };
-const juce::Rectangle<int> inputReadout { 116, 276, 64, 20 }, outputReadout { 620, 276, 64, 20 };
-const juce::Rectangle<int> summaryArea { 250, 302, 300, 14 };
-const juce::Rectangle<float> suppressionFrame { 40.0f, 330.0f, 560.0f, 168.0f };
-const juce::Rectangle<float> monitorFrame { 612.0f, 330.0f, 148.0f, 168.0f };
-constexpr int knobAxis = 410;
-constexpr int knobCentres[] { 150, 320, 490 };
-const juce::Point<int> listenCentre { 686, 414 };
+// Layout, in logical pixels. The rack ears frame an 800 px panel.
+constexpr float earWidth = 40.0f;
+const juce::Rectangle<float> nameplateArea { 64.0f, 22.0f, 250.0f, 42.0f };
+const juce::Rectangle<int> statusArea { 600, 22, 216, 36 };
+const juce::Rectangle<int> hostSettingsArea { 600, 62, 216, 16 };
+const juce::Rectangle<int> inputArea { 60, 122, 198, 164 }, reductionArea { 272, 100, 336, 216 },
+                           outputArea { 622, 122, 198, 164 };
+const juce::Point<float> inputClip { 159.0f, 304.0f }, outputClip { 721.0f, 304.0f };
+const juce::Rectangle<int> summaryArea { 290, 322, 300, 14 };
+const juce::Rectangle<float> suppressionFrame { 64.0f, 356.0f, 548.0f, 176.0f };
+const juce::Rectangle<float> monitorFrame { 626.0f, 356.0f, 190.0f, 176.0f };
+constexpr int knobAxis = 440;
+constexpr int knobCentres[] { 158, 338, 518 };
+const juce::Rectangle<int> listenArea { 671, 380, 100, 136 };
+
+const juce::Colour passLamp { 0xfff4eedc }, suppressLamp { 0xff8ae39a }, bypassLamp { 0xffff7b6b };
+
+// Peak meters: dBFS with the top of the range opened up, where levels are set.
+float peakPosition (float decibels)
+{
+    return std::pow (juce::jlimit (0.0f, 1.0f, (decibels + 60.0f) / 60.0f), 1.6f);
+}
 } // namespace
 
 affine::Theme SuppressorTheme::theme()
 {
     affine::Theme t;
-    t.panel.base = juce::Colour (0xff2a3037);
-    t.panel.brushing = 0.45f;
-    t.knob.pointer = juce::Colour (0xff1c1f22);
-    t.palette.accent = juce::Colour (0xff4fd6ff);
+    t.panel.texture = affine::PanelFinish::Texture::hammertone;
+    t.panel.base = juce::Colour (0xffb3b0a6);
+    t.panel.grain = 0.035f;
+    t.panel.mottle = 0.12f;
+    t.panel.sheen = 0.8f;
+    t.panel.dimple = 11.0f;
+
+    using Material = affine::KnobFinish::Material;
+    t.knob.cap = juce::Colour (0xff141414);
+    t.knob.body = juce::Colour (0xff121212);
+    t.knob.capMaterial = Material::glossPlastic;
+    t.knob.bodyMaterial = Material::glossPlastic;
+    t.knob.pointer = juce::Colour (0xfff2efe6);
+    t.knob.index = juce::Colour (0xfff2efe6);
+    t.knob.capRatio = 0.66f;
+    t.knob.gripRatio = 0.86f;
+    t.knob.capDome = 0.28f;
+    t.knob.ridges = 20;
+    t.knob.ridgeDepth = 0.9f;
+
+    auto& p = t.palette;
+    p.silkscreen = juce::Colour (0xff1b1a17);
+    p.silkscreenDim = juce::Colour (0xff25231f);
+    p.accent = juce::Colour (0xff2f9e4f);
+    p.attention = juce::Colour (0xffffb238);
+    p.danger = juce::Colour (0xffe5483b);
+    p.lamp = affine::Palette::Lamp::jewel;
+    p.readout = affine::Palette::Readout::backlit;
+    p.readoutBacklight = juce::Colour (0xfff1d58c);
+    p.readoutInk = juce::Colour (0xff1f1a12);
     return t;
 }
 
@@ -39,6 +75,7 @@ SuppressorEditor::SuppressorEditor (SuppressorProcessor& p)
 {
     setLookAndFeel (&look);
     setOpaque (true);
+    faceplate.setShowsScrews (false);
 
     int order = 1;
     for (auto* dial : { &threshold, &strength, &release })
@@ -60,43 +97,54 @@ SuppressorEditor::SuppressorEditor (SuppressorProcessor& p)
     listen.setTooltip ("Audition input minus processed audio, including filter phase differences; not isolated noise. Turn off to hear the processed signal.");
     listen.setExplicitFocusOrder (4);
     listen.setTheme (theme);
-    listen.setLampColour (theme.palette.attention);
-    listen.setLegend ("Listen", "Removed");
+    listen.setStyle (affine::KeyButton::Style::toggle);
+    listen.setLegend ("Removed", "Processed");
     addAndMakeVisible (listen);
 
-    affine::NeedleMeter::Scale scale;
+    affine::NeedleMeter::Face vu;
+    vu.backlight = juce::Colour (0xfff2d48a);
+    vu.ink = juce::Colour (0xff20190f);
+    vu.zone = juce::Colour (0xffc8321f);
+    vu.mirror = false;
+    vu.bezel = affine::NeedleMeter::Face::Bezel::chrome;
+
+    affine::NeedleMeter::Scale gr;
     // Square-root law: small reductions stay readable, deep gating still fits.
-    scale.toPosition = [] (float decibels) { return std::sqrt (juce::jlimit (0.0f, 1.0f, decibels / 60.0f)); };
-    scale.majors = { 0, 5, 10, 20, 30, 40, 60 };
-    scale.minors = { 1, 2, 3, 4, 6, 7, 8, 9, 15, 25, 35, 50 };
-    scale.format = [] (float v) { return whole (v); };
-    scale.unit = "dB";
-    scale.caption = "High-band reduction";
+    gr.toPosition = [] (float decibels) { return std::sqrt (juce::jlimit (0.0f, 1.0f, decibels / 60.0f)); };
+    gr.majors = { 0, 5, 10, 20, 30, 40, 60 };
+    gr.minors = { 1, 2, 3, 4, 6, 7, 8, 9, 15, 25, 35, 50 };
+    gr.format = [] (float v) { return whole (v); };
+    gr.unit = "dB";
+    gr.caption = "High-band reduction";
     reduction.setTheme (theme);
-    reduction.setScale (scale);
-    reduction.setBacklight (juce::Colour (0xfff2e4c4));
+    reduction.setScale (gr);
+    reduction.setFace (vu);
     addAndMakeVisible (reduction);
 
-    for (auto* ladder : { &inputLadder, &outputLadder })
+    affine::NeedleMeter::Scale peak;
+    peak.toPosition = peakPosition;
+    peak.majors = { -40, -20, -10, -5, 0 };
+    peak.minors = { -30, -15, -8, -6, -4, -3, -2, -1 };
+    peak.format = [] (float v) { return whole (v); };
+    peak.unit = "dBFS";
+    auto peakFace = vu;
+    peakFace.zoneFrom = peakPosition (-6.0f);
+    for (auto* m : { &inputMeter, &outputMeter })
     {
-        ladder->setTheme (theme);
-        ladder->setRange (-60.0f, 0.0f, 20);
-        ladder->setZones (-12.0f, -3.0f);
-        addAndMakeVisible (*ladder);
+        m->setTheme (theme);
+        m->setScale (peak);
+        m->setFace (peakFace);
+        m->setBallistics (6.0f, 0.82f);
+        addAndMakeVisible (*m);
     }
+    inputMeter.setCaption ("Input");
+    outputMeter.setCaption ("Output");
 
     status.setName ("Processing status");
     status.setTheme (theme);
-    status.setJustificationType (juce::Justification::centredLeft);
-    for (auto* readout : { &inputPeak, &outputPeak })
-    {
-        readout->setTheme (theme);
-        readout->setShowsLamp (false);
-        readout->setJustificationType (juce::Justification::centred);
-        readout->setDisplayFont (affine::fonts::readout (13.5f));
-        readout->setInterceptsMouseClicks (false, false);
-        readout->setAccessible (false);
-    }
+    status.setBacklit (true);
+    status.setJustificationType (juce::Justification::centred);
+    status.setDisplayFont (affine::fonts::label (15.0f, 0.18f));
     hostSettings.setName ("Host settings");
     hostSettings.setTheme (theme);
     hostSettings.setGlassVisible (false);
@@ -111,8 +159,7 @@ SuppressorEditor::SuppressorEditor (SuppressorProcessor& p)
     meterSummary.setJustificationType (juce::Justification::centred);
     meterSummary.setBorderSize (juce::BorderSize<int> (0));
     for (juce::Component* c : { static_cast<juce::Component*> (&status), static_cast<juce::Component*> (&meterSummary),
-                                static_cast<juce::Component*> (&hostSettings), static_cast<juce::Component*> (&inputPeak),
-                                static_cast<juce::Component*> (&outputPeak) })
+                                static_cast<juce::Component*> (&hostSettings) })
         addAndMakeVisible (c);
 
     setSize (width, height);
@@ -134,17 +181,15 @@ SuppressorEditor::~SuppressorEditor()
 void SuppressorEditor::resized()
 {
     status.setBounds (statusArea);
-    reduction.setBounds (meterArea);
-    inputLadder.setBounds (inputColumn);
-    outputLadder.setBounds (outputColumn);
-    inputPeak.setBounds (inputReadout);
-    outputPeak.setBounds (outputReadout);
+    hostSettings.setBounds (hostSettingsArea);
+    inputMeter.setBounds (inputArea);
+    reduction.setBounds (reductionArea);
+    outputMeter.setBounds (outputArea);
     meterSummary.setBounds (summaryArea);
     int i = 0;
     for (auto* dial : { &threshold, &strength, &release })
         dial->setBounds (dial->getBoundsForCentre ({ knobCentres[i++], knobAxis }));
-    listen.setBounds (juce::Rectangle<int> (96, 88).withCentre (listenCentre));
-    hostSettings.setBounds (hostSettingsArea);
+    listen.setBounds (listenArea);
 }
 
 void SuppressorEditor::visibilityChanged()
@@ -198,13 +243,15 @@ void SuppressorEditor::timerCallback()
                              : meter.reduction > 0.5f ? "Suppressing" : "Passing signal";
     status.setText (state, juce::dontSendNotification);
     if (! fresh)
-        status.setEmission (palette.accent.withMultipliedBrightness (0.55f), 0.0f);
+        status.setEmission (passLamp, 0.0f);
     else if (bypass)
-        status.setEmission (palette.silkscreen, 0.0f);
+        status.setEmission (bypassLamp, 1.0f);
     else if (audition || learning)
         status.setEmission (palette.attention, 1.0f);
+    else if (meter.input < 0.00001f)
+        status.setEmission (passLamp, 0.45f);
     else
-        status.setEmission (palette.accent, meter.input < 0.00001f ? 0.25f : 1.0f);
+        status.setEmission (meter.reduction > 0.5f ? suppressLamp : passLamp, 1.0f);
 
     threshold.setEnabled (! multi);
     strength.setEnabled (! multi);
@@ -238,20 +285,18 @@ void SuppressorEditor::timerCallback()
     const bool hasReduction = fresh && ! learning && (bypass || meter.input >= 0.00001f);
     reduction.setCaption (multi ? "Max band reduction" : "High-band reduction");
     reduction.setReading (meter.reduction, hasReduction);
-    inputLadder.setLevel (db (meter.input), fresh);
-    outputLadder.setLevel (db (meter.output), fresh);
-    inputLadder.setClip (fresh && (meter.flags & M::inputClip) != 0);
-    outputLadder.setClip (fresh && (meter.flags & M::outputClip) != 0);
-    inputPeak.setText (fresh ? levelText (meter.input) : "--", juce::dontSendNotification);
-    outputPeak.setText (fresh ? levelText (meter.output) : "--", juce::dontSendNotification);
-    const auto peakColour = fresh ? palette.accent : palette.accent.withMultipliedBrightness (0.5f);
-    inputPeak.setEmission (peakColour, fresh ? 1.0f : 0.0f);
-    outputPeak.setEmission (audition ? palette.attention : peakColour, fresh ? 1.0f : 0.0f);
+    inputMeter.setReading (db (meter.input), fresh);
+    outputMeter.setReading (db (meter.output), fresh);
+    outputMeter.setCaption (audition ? "Removed" : "Output");
 
-    if (audition != auditionShown)
+    const auto inClip = fresh && (meter.flags & M::inputClip) != 0;
+    const auto outClip = fresh && (meter.flags & M::outputClip) != 0;
+    if (inClip != inputClipped || outClip != outputClipped)
     {
-        auditionShown = audition;
-        repaint (outputColumn.withY (88).withHeight (20).expanded (40, 0));
+        inputClipped = inClip;
+        outputClipped = outClip;
+        for (auto centre : { inputClip, outputClip })
+            repaint (juce::Rectangle<int> (40, 40).withCentre (centre.toInt()));
     }
 }
 
@@ -259,45 +304,32 @@ void SuppressorEditor::print (juce::Graphics& g)
 {
     using namespace affine::silkscreen;
     const auto& palette = theme.palette;
-    wordmark (g, "Suppressor", "Guitar DI noise suppressor", { 40.0f, 22.0f }, palette);
-    groove (g, 32.0f, static_cast<float> (width) - 32.0f, 80.0f);
-    legend (g, "In", juce::Rectangle<int> (60, 16).withCentre ({ inputColumn.getCentreX(), 98 }).toFloat(), palette,
-            juce::Justification::centred);
+    const auto w = static_cast<float> (width), h = static_cast<float> (height);
+
+    affine::render::rackEar (g, { 0.0f, 0.0f, earWidth, h }, true);
+    affine::render::rackEar (g, { w - earWidth, 0.0f, earWidth, h }, false);
+
+    affine::render::nameplate (g, nameplateArea, "SUPPRESSOR", affine::fonts::label (25.0f, 0.42f));
+    g.setColour (palette.silkscreenDim);
+    g.setFont (affine::fonts::label (12.0f, 0.24f));
+    g.drawText ("GUITAR DI NOISE SUPPRESSOR", juce::Rectangle<float> (nameplateArea.getX() + 1.0f, nameplateArea.getBottom() + 6.0f, 300.0f, 14.0f),
+                juce::Justification::centredLeft, false);
+    groove (g, earWidth + 12.0f, w - earWidth - 12.0f, 92.0f);
+
+    g.setFont (affine::fonts::label (10.5f, 0.22f));
+    g.setColour (palette.silkscreen);
+    for (auto centre : { inputClip, outputClip })
+        g.drawText ("CLIP", juce::Rectangle<float> (40.0f, 12.0f).withCentre (centre.translated (32.0f, 0.0f)),
+                    juce::Justification::centredLeft, false);
+
     frame (g, suppressionFrame, "Suppression", palette);
     frame (g, monitorFrame, "Monitor", palette);
-
-    // Printed dBFS scales on the outer side of each column, and the clip legends.
-    g.setFont (affine::fonts::label (9.5f, 0.02f));
-    for (const auto* ladder : { &inputLadder, &outputLadder })
-    {
-        const auto span = ladder->getScaleSpan();
-        const bool left = ladder == &inputLadder;
-        const auto edge = left ? static_cast<float> (ladder->getX()) - 4.0f : static_cast<float> (ladder->getRight()) + 4.0f;
-        for (int value : { 0, -6, -12, -24, -36, -48, -60 })
-        {
-            const auto y = span.getY() + span.getHeight() * static_cast<float> (-value) / 60.0f;
-            g.setColour (palette.silkscreen.withAlpha (0.5f));
-            g.fillRect (left ? edge - 4.0f : edge, y - 0.5f, 4.0f, 1.0f);
-            g.setColour (palette.silkscreenDim);
-            g.drawText (juce::String (value), juce::Rectangle<float> (24.0f, 10.0f).withCentre ({ left ? edge - 18.0f : edge + 18.0f, y }),
-                        left ? juce::Justification::centredRight : juce::Justification::centredLeft, false);
-        }
-        const auto clip = ladder->getClipCentre();
-        g.setColour (palette.danger.withAlpha (0.85f));
-        g.setFont (affine::fonts::label (9.0f, 0.12f));
-        g.drawText ("CLIP", juce::Rectangle<float> (30.0f, 10.0f).withCentre ({ left ? edge - 19.0f : edge + 19.0f, clip.y }),
-                    left ? juce::Justification::centredRight : juce::Justification::centredLeft, false);
-        g.setFont (affine::fonts::label (9.5f, 0.02f));
-    }
-
-    makersMark (g, { 34.0f, static_cast<float> (height) - 10.0f }, palette);
+    makersMark (g, { earWidth + 24.0f, h - 12.0f }, palette);
 }
 
 void SuppressorEditor::paint (juce::Graphics& g)
 {
     faceplate.paint (g, getLocalBounds(), theme, [this] (juce::Graphics& plate) { print (plate); });
-    // The output column is labelled with what it is actually monitoring.
-    affine::silkscreen::legend (g, auditionShown ? "Removed" : "Out",
-                                juce::Rectangle<int> (90, 16).withCentre ({ outputColumn.getCentreX(), 98 }).toFloat(),
-                                theme.palette, juce::Justification::centred);
+    affine::render::jewel (g, inputClip, 11.0f, theme.palette.danger, inputClipped ? 1.0f : 0.0f);
+    affine::render::jewel (g, outputClip, 11.0f, theme.palette.danger, outputClipped ? 1.0f : 0.0f);
 }

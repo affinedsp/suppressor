@@ -116,9 +116,10 @@ TEST_CASE ("theme retains bundled fonts and accessible contrast")
         CHECK (contrast (palette.silkscreen, plate) >= 4.5f);
         CHECK (contrast (palette.silkscreenDim, plate) >= 4.5f);
     }
-    // Emitted readouts and lamps on display glass.
-    for (auto colour : { palette.accent, palette.attention, palette.danger, palette.silkscreen })
-        CHECK (contrast (colour, palette.glass) >= 4.5f);
+    // Readouts and the status window: dark lettering on lit glass.
+    CHECK (contrast (palette.readoutInk, palette.readoutBacklight) >= 4.5f);
+    for (auto lamp : { juce::Colour (0xfff4eedc), juce::Colour (0xff8ae39a), juce::Colour (0xffff7b6b), palette.attention })
+        CHECK (contrast (palette.readoutInk, lamp) >= 4.5f);
 }
 
 TEST_CASE ("four controls preserve the complete host parameter and saved-state contract")
