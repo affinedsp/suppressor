@@ -1,11 +1,11 @@
 # Suppressor interface
 
 The editor implements the shared [Affine design language](../libs/affine-ui/DESIGN_LANGUAGE.md)
-(v1.0) through the vendored `affine_ui` JUCE module. This document records only the
-Suppressor-specific decisions.
+(v2.0) in its **Stealth** finish through the vendored `affine_ui` JUCE module. This
+document records only the Suppressor-specific decisions.
 
 <p align="center">
-  <img src="images/suppressor-ui.png" alt="Suppressor suppressing: live input and output ladders, backlit high-band reduction meter near 40 dB, and the three suppression knobs" width="800">
+  <img src="images/suppressor-ui.png" alt="Suppressor in the Stealth finish: a matte black panel with a teal screen plotting six seconds of high-band reduction between plucked notes, input and output bar meters, three knobs with white LED rings and a Listen soft key" width="800">
 </p>
 
 ## Product
@@ -14,19 +14,18 @@ Suppressor-specific decisions.
   high-gain amplification.
 - **Primary task:** remove high-band noise between notes without losing body, sustain or
   pick attack, and check what was removed when in doubt.
-- **Finish:** graphite anodising, glacier-cyan emission, an incandescent meter card.
-- **Editor:** fixed 800 × 530 logical pixels; renders natively at 100–200% and on Retina.
+- **Finish:** modern matte hardware: black powder coat, dark knobs with white pointers
+  and white LED rings, a rubber soft key, and one colour screen. Teal appears only on the
+  screen and the *Suppressing* LED.
+- **Editor:** fixed 820 × 540 logical pixels; renders natively at 100–200% and on Retina.
 
 ## Layout
 
-The signal runs left to right across the meter bridge, and the controls sit below it.
-
 | Zone | Contents |
 |---|---|
-| Header | Wordmark; processing-status display with lamp; *Host settings active* lamp underneath when non-default legacy settings exist |
-| Meter bridge | **IN** peak ladder → backlit **reduction** meter → **OUT** peak ladder (relabelled **REMOVED** while auditioning), each ladder with a clip cell and a peak readout |
-| Suppression frame | Threshold, Strength, Release: medium knobs with calibrated scales and glass readouts |
-| Monitor frame | *Listen removed* latching key with an amber LED |
+| Header | Wide-tracked wordmark and descriptor; the processing status with its LED; *Host settings active* underneath when non-default legacy settings exist |
+| Screen | Left: **high-band reduction** over the last six seconds, with the current value above the plot. Right: **INPUT** and **OUTPUT** peak bars (the output relabelled **REMOVED** while auditioning), each with a readout and a clip cell |
+| Controls | Threshold, Strength, Release: medium knobs with LED rings and glass readouts; after a hairline, *Listen removed* as a soft key with a headphones glyph |
 
 ## Telemetry contract
 
@@ -36,28 +35,30 @@ Listen and band-mode settings, so an old block is never relabelled as the new mo
 
 | Display | Source | Presentation |
 |---|---|---|
-| IN / OUT ladders | Peak across channels, 300 ms decay | −60 to 0 dBFS in 3 dB segments: cyan, amber from −12 dBFS, red from −3 dBFS |
-| Clip cells | Processor clip flags, held for one second | Separate red cell above each column |
+| Reduction plot | Deepest high-band gain reduction, 120 ms decay, sampled 30 times a second while the editor is open | 0–60 dB on a square-root scale, 0 dB at the top, newest at the right; the plot breaks wherever reduction was unavailable (no audio, no input, learning) and reads *NO AUDIO* once six seconds hold no readings |
+| Reduction readout | The latest reading | dB to 0.1, `60+` beyond the scale, `--` when unavailable |
+| INPUT / OUTPUT bars | Peak across channels, 300 ms decay | −60 to 0 dBFS in 1.5 dB segments: teal, pale from −12 dBFS, amber from −3 dBFS |
+| Clip cells | Processor clip flags, held for one second | Separate red cell at the end of each bar |
 | Peak readouts | Same peaks | dBFS to 0.1 dB, `-inf` for silence, `--` when not live |
-| Reduction meter | Deepest high-band gain reduction, 120 ms decay | 0–60 dB on a square-root scale so small reductions stay readable; lamp dims and needle rests when reduction is unavailable (no audio, no input, learning) |
 | Status | Snapshot flags | *No audio*, *No input*, *Passing signal*, *Suppressing*, *Listening to difference*, *Bypassed*, *Learning bands* |
 
-The needle's spring-damper ballistics (about 300 ms to settle) are presentation only.
+The plot shows stored readings only: nothing is interpolated across gaps or extrapolated
+past the newest reading.
 
 ## States
 
 | State | Presentation |
 |---|---|
-| Suppressing | Cyan status lamp, needle on the reduction, ladders live |
-| Listen removed | Amber key LED and status, **REMOVED** legend and amber readout on the output column |
-| Multiband topology | Meter caption reads **MAX BAND REDUCTION**; Threshold and Strength are disabled (veiled) because that mode uses its own splits and learned thresholds |
-| Learning bands | Amber status; reduction marked unavailable, so the meter lamp dims |
-| Bypassed | Needle at rest with the lamp lit (no reduction is applied) |
-| Stopped audio | Lamp dims, needle rests, ladders dark, readouts `--` |
+| Suppressing | Teal status LED, the plot follows the reduction, bars live |
+| Listen removed | Amber LED strip on the key and amber status LED; the output bar reads **REMOVED** in amber |
+| Multiband topology | The plot title reads **MAX BAND REDUCTION**; Threshold and Strength are disabled (their rings go dark) because that mode uses its own splits and learned thresholds |
+| Learning bands | Amber status LED; reduction is unavailable, so the plot breaks |
+| Bypassed | Red status LED; the plot runs along 0 dB (no reduction is applied) |
+| Stopped audio | Status LED off, bars dark, readouts `--`, the plot breaks |
 
 <p align="center">
-  <img src="images/suppressor-delta-audition.png" alt="Listening to the removed signal: amber status, lit Listen key and REMOVED output column" width="400">
-  <img src="images/suppressor-learning.png" alt="Learning bands in multiband mode: amber status, dimmed meter, disabled Threshold and Strength, host settings lamp" width="400">
+  <img src="images/suppressor-delta-audition.png" alt="Listening to the removed signal: amber status LED and key strip, output bar relabelled REMOVED in amber" width="400">
+  <img src="images/suppressor-learning.png" alt="Learning bands in multiband mode: amber status LED, plot titled MAX BAND REDUCTION, disabled Threshold and Strength, host settings line" width="400">
 </p>
 
 ## Parameter contract
@@ -65,7 +66,7 @@ The needle's spring-damper ballistics (about 300 ms to settle) are presentation 
 Unchanged: all 20 parameters keep their IDs, order, version hints, ranges, defaults,
 tapers, text conversion and automation. The editor exposes Threshold, Strength, Release
 and Delta Audition; the remaining engine settings stay available in the host's parameter
-view and are summarised by the *Host settings active* lamp's tooltip.
+view and are summarised by the *Host settings active* tooltip.
 
 ## Interaction
 
@@ -86,10 +87,10 @@ view and are summarised by the *Host settings active* lamp's tooltip.
 
 - Every control exposes its parameter name, formatted value with unit, and a description.
 - The *Signal meters* label carries a live summary (input and output dBFS, reduction or
-  why it is unavailable, clip warnings); the per-column readouts are hidden from assistive
+  why it is unavailable, clip warnings); the screen itself is hidden from assistive
   technology so values are not announced twice.
-- State is never colour-only: every lamp has a text legend and every mode change has a
-  printed or displayed label.
+- State is never colour-only: the status is always spelled out next to its LED, and
+  every mode change has a printed or displayed label.
 - Printed text meets 4.5:1 on the plate, including its darker lower edge; emitted
   colours meet 4.5:1 on display glass. Both are unit-tested.
 
@@ -102,4 +103,6 @@ view and are summarised by the *Host settings active* lamp's tooltip.
 - The DSP suite is unchanged and passes.
 - pluginval 1.0.4 at strictness 10 reports `SUCCESS` for the VST3.
 - With `SUPPRESSOR_UI_CAPTURE_DIR` set, the UI tests write a PNG of every state and scale;
-  CI uploads them for macOS, Windows and Linux.
+  before the main capture they play six seconds of plucked notes at real-time pace, so
+  the plot shows readings the processor produced. CI uploads the captures for macOS,
+  Windows and Linux.
