@@ -55,6 +55,39 @@ void feed (juce::AudioProcessor& p, int blocks = 120, bool silence = false, bool
         if (bypass) p.processBlockBypassed (buffer, midi); else p.processBlock (buffer, midi);
     }
 }
+bool capturing() { return juce::SystemStats::getEnvironmentVariable ("SUPPRESSOR_UI_CAPTURE_DIR", {}).isNotEmpty(); }
+// Plucked notes over a hiss floor, processed at real-time pace so the editor's
+// reduction history fills with readings the processor actually produced.
+void playPlucks (juce::AudioProcessor& p)
+{
+    struct Pluck { double at, level; };
+    const Pluck notes[] { { 0.0, 0.30 }, { 0.9, 0.18 }, { 1.5, 0.34 }, { 2.9, 0.22 }, { 3.4, 0.12 }, { 4.6, 0.32 }, { 5.3, 0.2 } };
+    constexpr double length = 6.2, fundamental = 196.0;
+    juce::AudioBuffer<float> buffer (2, 256);
+    juce::MidiBuffer midi;
+    juce::Random hiss (7);
+    const auto start = juce::Time::getMillisecondCounterHiRes();
+    const auto blocks = static_cast<int> (length * 48000.0 / 256.0);
+    for (int b = 0; b < blocks; ++b)
+    {
+        for (int n = 0; n < 256; ++n)
+        {
+            const auto t = (b * 256 + n) / 48000.0;
+            auto sample = 0.002 * (hiss.nextDouble() * 2.0 - 1.0);
+            for (const auto& note : notes)
+                if (t >= note.at)
+                    for (int k = 1; k <= 30; ++k)
+                        sample += note.level / k * std::exp (-(t - note.at) * (1.5 + 0.35 * k))
+                                * std::sin (juce::MathConstants<double>::twoPi * fundamental * k * (t - note.at));
+            buffer.setSample (0, n, static_cast<float> (sample));
+            buffer.setSample (1, n, static_cast<float> (sample));
+        }
+        p.processBlock (buffer, midi);
+        const auto due = start + (b + 1) * 256.0 / 48.0;
+        while (juce::Time::getMillisecondCounterHiRes() < due)
+            pump (2);
+    }
+}
 juce::MouseEvent event (juce::Component& c, juce::Point<float> pos = { 60, 60 }, int modifiers = juce::ModifierKeys::leftButtonModifier)
 {
     const auto now = juce::Time::getCurrentTime();
@@ -322,6 +355,8 @@ TEST_CASE ("live meter states, stale data, legacy modes and monitor labels are e
     feed (p);
     expectStatus (*status, "Suppressing");
     CHECK (summary->getDescription().contains ("High-band reduction"));
+    if (capturing())
+        playPlucks (p);
     capture (*editor, "suppressor-ui");
     for (float scale : { 1.0f, 1.25f, 1.5f, 1.75f, 2.0f })
     {
